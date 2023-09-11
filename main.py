@@ -1,6 +1,6 @@
 import sys
 from PyQt6 import QtWidgets
-from PyQt6.QtGui import QImage, QPixmap, QPalette, QColor, QWindow, QMovie, QFont
+from PyQt6.QtGui import QImage, QPixmap, QPalette, QColor, QWindow, QMovie, QFont, QIcon
 from PyQt6.QtCore import QTimer
 from output import Ui_DeepFakeHHN
 import cv2
@@ -24,6 +24,13 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         # region Initial Label States
         hhn_logo = QPixmap("./images/hhn_logo.png").scaledToWidth(200)
         self.label_hhn_logo.setPixmap(hhn_logo)
+
+        # setting image to the button
+        self.button_preview_1.setStyleSheet("border-image : url(images/01_Titanic.jpg)")
+        self.button_preview_2.setStyleSheet("border-image : url(images/02_Braveheart.jpg)")
+        self.button_preview_3.setStyleSheet("border-image : url(images/03_FluchDerKaribik.jpg)")
+        self.button_preview_4.setStyleSheet("border-image : url(images/04_TheOffice.jpg)")
+        # self.button_preview_1.setIcon(QIcon('images/01_Titanic.jpg'))
         # endregion
 
         # region Palettes
