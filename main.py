@@ -1,11 +1,29 @@
 import sys
 from PyQt6 import QtWidgets
 from PyQt6.QtGui import QImage, QPixmap, QPalette, QColor, QWindow, QMovie, QFont, QIcon
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QTimer, Qt
 from output import Ui_DeepFakeHHN
 import cv2
 import numpy as np
 import time
+
+"""
+python test_video_swapspecific.py --crop_size 224 --use_mask --pic_specific_path ./demo_file/titanic.png --name people --Arc_path arcface_model/arcface_checkpoint.tar --pic_a_path ./demo_file/titanic.jpg --video_path ./demo_file/titanic_short.mp4  --output_path ./output/titanic.mp4 --temp_path ./temp_results --no_simswaplogo
+
+"""
+
+
+
+
+
+default_button_stylesheet = "background-repeat: no-repeat;"\
+                            "background-position: center;"\
+                            "border: 5px solid;"\
+                            "border-color: rgb(46, 103, 156); "\
+                            "border-radius: 3px; " \
+                            "padding-right: 10px;" \
+                            " padding-left: 10px; "\
+                            "padding-top: 5px; padding-bottom: 5px;"
 
 
 class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
@@ -15,6 +33,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
 
         # region - Internal Variables -
         # region State Variables and Objects
+        self.selected_clip = 0
         self.movie = QMovie("./loader.gif")
         # self.background_clip = QMovie()
         self.camera = cv2.VideoCapture(0)
@@ -26,11 +45,14 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         self.label_hhn_logo.setPixmap(hhn_logo)
 
         # setting image to the button
-        self.button_preview_1.setStyleSheet("border-image : url(images/01_Titanic.jpg)")
-        self.button_preview_2.setStyleSheet("border-image : url(images/02_Braveheart.jpg)")
-        self.button_preview_3.setStyleSheet("border-image : url(images/03_FluchDerKaribik.jpg)")
-        self.button_preview_4.setStyleSheet("border-image : url(images/04_TheOffice.jpg)")
+        self.button_preview_1.setStyleSheet("background-image : url(images/01_Titanic.jpg); " + default_button_stylesheet)
+
+        # self.button_preview_1.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.button_preview_2.setStyleSheet("background-image : url(images/02_Braveheart.jpg);" + default_button_stylesheet)
+        self.button_preview_3.setStyleSheet("background-image : url(images/03_FluchDerKaribik.jpg);" + default_button_stylesheet)
+        self.button_preview_4.setStyleSheet("background-image : url(images/04_TheOffice.jpg);" + default_button_stylesheet)
         # self.button_preview_1.setIcon(QIcon('images/01_Titanic.jpg'))
+        self.button_preview_1.setText("")
         # endregion
 
         # region Palettes
@@ -51,7 +73,6 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         self.button_preview_2.clicked.connect(lambda: self.select_clip(1))
         self.button_preview_3.clicked.connect(lambda: self.select_clip(2))
         self.button_preview_4.clicked.connect(lambda: self.select_clip(3))
-
         # endregion
         # endregion
 
@@ -68,7 +89,19 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
 
     # region Button Events
     def select_clip(self, idx):
-        pass
+        self.selected_clip = idx
+        """
+        if idx == 0:
+            self.button_preview_1.setStyleSheet("background-image : url(images/01_Titanic.jpg); "
+                                                "background-repeat: no-repeat;"
+                                                "background-position: center;"
+                                                "background-color: green")
+        else:
+            self.button_preview_1.setStyleSheet("background-image : url(images/01_Titanic.jpg); "
+                                                "background-repeat: no-repeat;"
+                                                "background-position: center;"
+                                                "background-color: red")
+        """
     # endregion
 
     # region Live Images
