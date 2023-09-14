@@ -9,6 +9,85 @@ import numpy as np
 import time
 import os
 
+import torch
+import fractions
+from PIL import Image
+import torch.nn.functional as F
+from torchvision import transforms
+from simswap.models.models import create_model
+from simswap.options.test_options import TestOptions
+from simswap.insightface_func.face_detect_crop_multi import Face_detect_crop
+from simswap.util.videoswap_specific import video_swap
+import os
+
+transformer_Arcface = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ])
+
+
+class FaceDetectionOptions:
+    name = "people"
+    gpu_ids = "0"
+    checkpoints_dir = "./checkpoints"
+    norm = "batch"
+    data_type = "32"
+    verbose = False
+    fp16 = False
+    local_rank = 0
+
+    batch_size = 8
+    load_size = 1024
+    final_size = 512
+    label_nc = 0
+    input_nc = 3
+    output_nc = 3
+
+    dataroot = './datasets/cityscapes/'
+    resize_or_crop = 'scale_width'
+    n_threads = 2
+    max_dataset_size = float("inf")
+
+    display_winsize = 512
+
+    netG = 'global'
+    latent_size = 512
+    ngf = 64
+    n_downsample_global = 3
+    n_blocks_global = 6
+    n_blocks_local = 3
+    n_local_enhancers = 1
+    niter_fix_global = 0
+
+    feat_num = 3
+    n_dowmsample_E = 4
+    nef = 16
+    n_clusters = 10
+    image_size = 224
+    norm_G = 'spectralspadesynchbatch3x3'
+    semantic_nc = 3
+
+    ntest = float("inf")
+    results_dir = "./results/"
+    aspect_ratio = 1.0
+    phase = "test"
+    which_epoch = "latest"
+    how_many = 50
+    cluster_path = 'features_clustered_010.npy'
+    arc_path = 'arcface_model/arcface_checkpoint.tar'
+    pic_a_path = 'G:/swap_data/ID/elon-musk-hero-image.jpeg'
+    pic_b_path = './demo_file/multi_people.jpg'
+    pic_specific_path = './crop_224/zrf.jpg'
+    multispecific_dir = './demo_file/multispecific'
+    video_path = 'G:/swap_data/video/HSB_Demo_Trim.mp4'
+    temp_path = './temp_results'
+    output_path = './output/'
+    id_thres = 0.03
+    crop_size = 224
+    is_train = False
+    use_mask = True
+
+
 """
 python test_video_swapspecific.py --crop_size 224 --use_mask --pic_specific_path ./demo_file/titanic.png --name people --Arc_path arcface_model/arcface_checkpoint.tar --pic_a_path ./demo_file/titanic.jpg --video_path ./demo_file/titanic_short.mp4  --output_path ./output/titanic.mp4 --temp_path ./temp_results --no_simswaplogo
 
@@ -41,17 +120,6 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         # self.background_clip = QMovie()
         self.camera = cv2.VideoCapture(0)
         self.background_clip = cv2.VideoCapture("./videos/distant_particles_loop.mp4")
-        # endregion
-
-        # region Palettes
-        self._blue_palette = QPalette()
-        self._blue_palette.setColor(QPalette.ColorRole.Window, QColor(0, 0, 255))
-
-        self._green_palette = QPalette()
-        self._green_palette.setColor(QPalette.ColorRole.Window, QColor(0, 255, 0))
-
-        self._yellow_palette = QPalette()
-        self._yellow_palette.setColor(QPalette.ColorRole.Window, QColor(255, 255, 0))
         # endregion
 
         # region Initial Label States
@@ -162,6 +230,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
             self.progress_bar.setValue(0)
 
             # 2. Detect Face in recorded image
+            self.detect_face_in_webcam_image()
 
             # 3. Apply Face Swap for three images of the selected scene
 
@@ -174,14 +243,12 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
 
             self.tool_box.setCurrentIndex(0)
 
-
     def change_tool_box(self):
         if self.tool_box.currentIndex() == 0:
             self.select_clip(0)
             self.button_generate.setText("Generate")
         elif self.tool_box.currentIndex() == 1:
             self.button_generate.setText("Try Again")
-
 
     def set_output_images(self):
         image_size = np.clip(int(self.label_original_1.height()), 220, 500)
@@ -230,6 +297,55 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         self.centralwidget.setStyleSheet(stylesheet)
 
     # endregion
+
+    # region Simswap Functions
+    def detect_face_in_webcam_image(self):
+        opt = FaceDetectionOptions()
+        target_path = opt.pic_specific_path
+        crop_size = opt.crop_size
+        torch.nn.Module.dump_patches = True
+
+        # Create Model and set to Evaluation Mode
+        model = create_model(opt)
+        model.eval()
+
+        # Create Face Detection Model
+        app = Face_detect_crop(name='antelope', root='.simswap/insightface_func/models')
+        app.prepare(ctx_id=0, det_size=(640, 640), mode='None')
+
+        # Detect face in webcam image and extract features
+        with torch.no_grad():
+            source_face_image, _ = app.get(self.image_webcam, crop_size)
+            source_face_image_pil = Image.fromarray(cv2.cvtColor(source_face_image[0], cv2.COLOR_BGR2RGB))
+            source_face_image = transformer_Arcface(source_face_image_pil)
+            source_face = source_face_image.view(-1, source_face_image.shape[0],
+                                                 source_face_image.shape[1],
+                                                 source_face_image.shape[2])
+
+            # Convert numpy to tensor
+            source_face = source_face.cuda()
+
+            # Create latent id
+            source_image_downsample = F.interpolate(source_face, size=(112, 112))
+            latend_source_id = model.netArc(source_image_downsample)
+            latend_source_id = F.normalize(latend_source_id, p=2, dim=1)
+
+        # Detect the specific person to be swapped in the provided image
+        with torch.no_grad():
+            target_face_whole = cv2.imread(target_path)
+            target_face_align_crop, _ = app.get(target_face_whole, crop_size)
+            target_face_align_crop_pil = Image.fromarray(cv2.cvtColor(target_face_align_crop[0], cv2.COLOR_BGR2RGB))
+            target_face = transformer_Arcface(target_face_align_crop_pil)
+            target_face = target_face.view(-1, target_face.shape[0], target_face.shape[1], target_face.shape[2])
+            target_face = target_face.cuda()
+            target_face_downsample = F.interpolate(target_face, size=(112, 112))
+            target_face_id_nonorm = model.netArc(target_face_downsample)
+
+        # Given the source and target person ids, swap faces in the provided video
+        with torch.no_grad():
+            video_swap(opt.video_path, latend_source_id, target_face_id_nonorm, opt.id_thres,
+                       model, app, opt.output_path, temp_results_dir=opt.temp_path, no_simswaplogo=True,
+                       use_mask=opt.use_mask, crop_size=crop_size)
 
 
 def main():
