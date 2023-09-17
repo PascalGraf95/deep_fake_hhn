@@ -82,7 +82,6 @@ if __name__ == '__main__':
         latend_id = model.netArc(img_id_downsample)
         latend_id = F.normalize(latend_id, p=2, dim=1)
 
-
         # The specific person to be swapped
         specific_person_whole = cv2.imread(pic_specific)
         specific_person_align_crop, _ = app.get(specific_person_whole,crop_size)
@@ -93,6 +92,6 @@ if __name__ == '__main__':
         specific_person_downsample = F.interpolate(specific_person, size=(112,112))
         specific_person_id_nonorm = model.netArc(specific_person_downsample)
 
-        video_swap(opt.video_path, latend_id,specific_person_id_nonorm, opt.id_thres, \
+        video_swap(opt.video_path, latend_id, specific_person_id_nonorm, opt.id_thres, \
             model, app, opt.output_path,temp_results_dir=opt.temp_path,no_simswaplogo=opt.no_simswaplogo,use_mask=opt.use_mask,crop_size=crop_size)
 

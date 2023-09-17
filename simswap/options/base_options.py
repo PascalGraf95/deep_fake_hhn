@@ -20,7 +20,7 @@ class BaseOptions():
         self.parser.add_argument('--verbose', action='store_true', default=False, help='toggles verbose')
         self.parser.add_argument('--fp16', action='store_true', default=False, help='train with AMP')
         self.parser.add_argument('--local_rank', type=int, default=0, help='local rank for distributed training')
-        self.parser.add_argument('--isTrain', type=bool, default=True, help='local rank for distributed training')
+        self.parser.add_argument('--is_train', type=bool, default=True, help='local rank for distributed training')
 
         # input/output sizes       
         self.parser.add_argument('--batchSize', type=int, default=8, help='input batch size')
@@ -70,7 +70,7 @@ class BaseOptions():
         if not self.initialized:
             self.initialize()
         self.opt = self.parser.parse_args()
-        self.opt.isTrain = self.isTrain   # train or test
+        self.opt.is_train = self.is_train   # train or test
 
         str_ids = self.opt.gpu_ids.split(',')
         self.opt.gpu_ids = []
@@ -91,7 +91,7 @@ class BaseOptions():
         print('-------------- End ----------------')
 
         # save to the disk
-        if self.opt.isTrain:
+        if self.opt.is_train:
             expr_dir = os.path.join(self.opt.checkpoints_dir, self.opt.name)
             util.mkdirs(expr_dir)
             if save and not self.opt.continue_train:

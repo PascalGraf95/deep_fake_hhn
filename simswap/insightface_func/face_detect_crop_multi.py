@@ -14,7 +14,7 @@ import os
 import os.path as osp
 import cv2
 from insightface.model_zoo import model_zoo
-from simswap.insightface_func.utils import face_align_ffhqandnewarc as face_align
+from .utils import face_align_ffhqandnewarc as face_align
 
 __all__ = ['Face_detect_crop', 'Face']
 
@@ -28,9 +28,9 @@ Face.__new__.__defaults__ = (None, ) * len(Face._fields)
 
 
 class Face_detect_crop:
-    def __init__(self, name, root='~/.insightface_func/models'):
+    def __init__(self, name, root='./simswap/insightface_func/models'):
         self.models = {}
-        root = os.path.expanduser(root)
+        # root = os.path.expanduser(root)
         onnx_files = glob.glob(osp.join(root, name, '*.onnx'))
         onnx_files = sorted(onnx_files)
         for onnx_file in onnx_files:

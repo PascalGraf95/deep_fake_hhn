@@ -64,7 +64,7 @@ def video_swap(video_path, id_vetor,specific_person_id_nonorm,id_thres, swap_mod
     for frame_index in tqdm(range(frame_count)): 
         ret, frame = video.read()
         if  ret:
-            detect_results = detect_model.get(frame,crop_size)
+            detect_results = detect_model.get(frame, crop_size)
 
             if detect_results is not None:
                 # print(frame_index)

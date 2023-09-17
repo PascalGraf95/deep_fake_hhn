@@ -46,7 +46,7 @@ class fsModel(BaseModel):
         BaseModel.initialize(self, opt)
         if opt.resize_or_crop != 'none' or not opt.isTrain:  # when training at full res this causes OOM
             torch.backends.cudnn.benchmark = True
-        self.isTrain = opt.isTrain
+        self.is_train = opt.is_train
 
         device = torch.device("cuda:0")
 
@@ -60,63 +60,17 @@ class fsModel(BaseModel):
         self.netG.to(device)
 
         # Id network
-        netArc_checkpoint = opt.Arc_path
-        netArc_checkpoint = torch.load(netArc_checkpoint, map_location=torch.device("cpu"))
+        netArc_checkpoint = opt.arc_path
+        netArc_checkpoint = torch.jit.load(netArc_checkpoint)
         self.netArc = netArc_checkpoint
         self.netArc = self.netArc.to(device)
         self.netArc.eval()
 
-        if not self.isTrain:
-            pretrained_path = '' if not self.isTrain else opt.load_pretrain
+        if not self.is_train:
+            pretrained_path = '' if not self.is_train else opt.load_pretrain
             print("PRETRAINED PATH:", pretrained_path)
             self.load_network(self.netG, 'G', opt.which_epoch, pretrained_path)
             return
-
-        # Discriminator network
-        if opt.gan_mode == 'original':
-            use_sigmoid = True
-        else:
-            use_sigmoid = False
-        self.netD1 = Discriminator(input_nc=3, use_sigmoid=use_sigmoid)
-        self.netD2 = Discriminator(input_nc=3, use_sigmoid=use_sigmoid)
-        self.netD1.to(device)
-        self.netD2.to(device)
-
-        #
-        self.spNorm =SpecificNorm()
-        self.downsample = nn.AvgPool2d(3, stride=2, padding=[1, 1], count_include_pad=False)
-
-        # load networks
-        if opt.continue_train or opt.load_pretrain:
-            pretrained_path = '' if not self.isTrain else opt.load_pretrain
-            # print (pretrained_path)
-            self.load_network(self.netG, 'G', opt.which_epoch, pretrained_path)
-            self.load_network(self.netD1, 'D1', opt.which_epoch, pretrained_path)
-            self.load_network(self.netD2, 'D2', opt.which_epoch, pretrained_path)
-
-
-
-        if self.isTrain:
-            # define loss functions
-            self.loss_filter = self.init_loss_filter(not opt.no_ganFeat_loss, not opt.no_vgg_loss)
-
-            self.criterionGAN = networks.GANLoss(opt.gan_mode, tensor=self.Tensor, opt=self.opt)
-            self.criterionFeat = nn.L1Loss()
-            self.criterionRec = nn.L1Loss()
-
-            # Names so we can breakout loss
-            self.loss_names = self.loss_filter('G_GAN', 'G_GAN_Feat', 'G_VGG', 'G_ID', 'G_Rec', 'D_GP',
-                                               'D_real', 'D_fake')
-
-           # initialize optimizers
-
-            # optimizer G
-            params = list(self.netG.parameters())
-            self.optimizer_G = torch.optim.Adam(params, lr=opt.lr, betas=(opt.beta1, 0.999))
-
-            # optimizer D
-            params = list(self.netD1.parameters()) + list(self.netD2.parameters())
-            self.optimizer_D = torch.optim.Adam(params, lr=opt.lr, betas=(opt.beta1, 0.999))
 
     def _gradinet_penalty_D(self, netD, img_att, img_fake):
         # interpolate sample

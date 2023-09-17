@@ -125,51 +125,30 @@ def reverse2wholeimage(b_align_crop_tenor_list,swaped_imgs, mats, crop_size, ori
 
         img_white = cv2.warpAffine(img_white, mat_rev, orisize)
 
-
-        img_white[img_white>20] =255
+        img_white[img_white > 20] = 255
 
         img_mask = img_white
 
-        # if use_mask:
-        #     kernel = np.ones((40,40),np.uint8)
-        #     img_mask = cv2.erode(img_mask,kernel,iterations = 1)
-        # else:
-        kernel = np.ones((40,40),np.uint8)
-        img_mask = cv2.erode(img_mask,kernel,iterations = 1)
+        kernel = np.ones((40, 40), np.uint8)
+        img_mask = cv2.erode(img_mask, kernel, iterations = 1)
         kernel_size = (20, 20)
         blur_size = tuple(2*i+1 for i in kernel_size)
         img_mask = cv2.GaussianBlur(img_mask, blur_size, 0)
-
-        # kernel = np.ones((10,10),np.uint8)
-        # img_mask = cv2.erode(img_mask,kernel,iterations = 1)
-
-
-
         img_mask /= 255
 
         img_mask = np.reshape(img_mask, [img_mask.shape[0],img_mask.shape[1],1])
-
-        # pasing mask
-
-        # target_image_parsing = postprocess(target_image, source_image, tgt_mask)
 
         if use_mask:
             target_image = np.array(target_image, dtype=np.float32) * 255
         else:
             target_image = np.array(target_image, dtype=np.float32)[..., ::-1] * 255
 
-
         img_mask_list.append(img_mask)
         target_image_list.append(target_image)
-        
 
-    # target_image /= 255
-    # target_image = 0
     img = np.array(oriimg, dtype=np.float32)
     for img_mask, target_image in zip(img_mask_list, target_image_list):
         img = img_mask * target_image + (1-img_mask) * img
         
     final_img = img.astype(np.uint8)
-    if not no_simswaplogo:
-        final_img = logoclass.apply_frames(final_img)
     cv2.imwrite(save_path, final_img)
