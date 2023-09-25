@@ -1,14 +1,20 @@
+import glob
 import sys
 from PyQt6 import QtWidgets
 from PyQt6.QtGui import QImage, QPixmap, QPalette, QColor, QWindow, QMovie, QFont, QIcon
+from PyQt6.QtMultimedia import QSoundEffect
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import QFrame
+from tqdm import tqdm
+
 from output import Ui_DeepFakeHHN
 import cv2
 import numpy as np
 import time
 import os
-
+from moviepy.editor import AudioFileClip, VideoFileClip
+from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
+import shutil
 import torch
 import fractions
 from PIL import Image
@@ -84,10 +90,10 @@ class FaceDetectionOptions:
     which_epoch = "latest"
     how_many = 50
     cluster_path = 'features_clustered_010.npy'
-    arc_path = './simswap/arcface_model/new_arc_checkpoint.tjm'
+    arc_path = 'simswap/arcface_model/arcface_checkpoint.tar'
     temp_path = './simswap/temp_results'
     output_path = './output/'
-    id_thres = 0.05
+    id_thres = 0.04
     crop_size = 224
     is_train = False
     use_mask = True
@@ -96,9 +102,9 @@ class FaceDetectionOptions:
 """
 python test_video_swapspecific.py --crop_size 224 --use_mask --pic_specific_path ./demo_file/titanic.png --name people --Arc_path arcface_model/arcface_checkpoint.tar --pic_a_path ./demo_file/titanic.jpg --video_path ./demo_file/titanic_short.mp4  --output_path ./output/titanic.mp4 --temp_path ./temp_results --no_simswaplogo
 
+
+python test_wholeimage_swapspecific.py --name people --pic_specific_path demo_file/khaleesi.jpg --crop_size 224 --Arc_path arcface_model/arcface_checkpoint.tar --pic_a_path demo_file/ich.jpg --pic_b_path demo_file/khaleesi.jpg --output_path output/ 
 """
-
-
 selected_style_sheet = "background-repeat: no-repeat;"\
                        "background-position: center;"\
                        "border: 5px solid;"\
@@ -117,6 +123,11 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         self.setupUi(self)
         self.showFullScreen()
 
+        # region Bug Fix
+        self.tool_box.setCurrentIndex(1)
+        time.sleep(0.5)
+        self.tool_box.setCurrentIndex(0)
+
         # region - Internal Variables -
         # Simswap Objects
         self.opt = None
@@ -132,6 +143,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         self.selected_clip = 0
         self.recorded_image = None
         self.movie = QMovie("./loader.gif")
+        self.video_fps = 30
+        self.deep_fake_video = None
         # self.background_clip = QMovie()
         self.camera = cv2.VideoCapture(0)
         self.background_clip = cv2.VideoCapture("./videos/distant_particles_loop.mp4")
@@ -191,6 +204,11 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         self.live_image_timer.timeout.connect(self.update_webcam_image)
         self.live_image_timer.start(30)
 
+        # Setup Deep Fake Result Video
+        self.deep_fake_video_timer = QTimer()
+        self.deep_fake_video_timer.timeout.connect(self.update_fake_video_image)
+
+
         # self.background_image_timer = QTimer()
         # self.background_image_timer.timeout.connect(self.update_background_image)
         # self.background_image_timer.start(30)
@@ -228,15 +246,15 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
 
             # 1. Initialize Simswap Models
             self.initialize_models()
-            self.progress_bar.setValue(15)
+            self.progress_bar.setValue(25)
 
             # 2. Detect & encode face in recorded image and target images
             self.encode_face_in_webcam_image()
             self.encode_target_face(r".\images\scenes\{:02d}\target_face.jpg".format(self.selected_clip))
-            self.progress_bar.setValue(25)
+            self.progress_bar.setValue(50)
 
             # 3. Apply Face Swap for three images of the selected scene
-            for i, value in enumerate([50, 75, 100]):
+            for i, value in enumerate([75, 100]):
                 final_image = self.face_swap_image(r".\images\scenes\{:02d}\{:02d}.jpg".format(self.selected_clip, i+1))
                 cv2.imwrite(r".\images\generated\{:02d}.jpg".format(i+1), final_image)
                 self.progress_bar.setValue(value)
@@ -248,10 +266,24 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
 
             self.tool_box.setCurrentIndex(1)
             self.progress_bar.setValue(0)
+            self.tool_box.repaint()
 
             # 5. Meanwhile, apply Face Swap to the whole video in background
-
+            first_yield = True
+            frame_count = 0
+            for i in self.face_swap_video(r".\videos\scenes\{:02d}\scene.mp4".format(self.selected_clip)):
+                if first_yield:
+                    frame_count = i
+                    first_yield = False
+                if np.isnan(i):
+                    break
+                self.tool_box.repaint()
+                self.progress_bar.setValue(int(i/frame_count*100))
+                
             # 6. Show Results
+            self.deep_fake_video = cv2.VideoCapture(r".\videos\generated\scene.mp4")
+            self.deep_fake_video_timer.start(30)
+            self.progress_bar.setValue(0)
 
         elif self.tool_box.currentIndex() == 1:
             self.tool_box.setCurrentIndex(0)
@@ -267,13 +299,13 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         image_size = np.clip(int(self.label_original_1.height()), 220, 500)
 
         # Original Images
-        for i, label in enumerate([self.label_original_1, self.label_original_2, self.label_original_3]):
+        for i, label in enumerate([self.label_original_1, self.label_original_2]):
             image_path = r".\images\scenes\{:02d}\{:02d}.jpg".format(self.selected_clip, i+1)
             original_image = QPixmap(image_path).scaledToHeight(image_size)
             label.setPixmap(original_image)
 
         # Generated Images
-        for i, label in enumerate([self.label_deep_fake_1, self.label_deep_fake_2, self.label_deep_fake_3]):
+        for i, label in enumerate([self.label_deep_fake_1, self.label_deep_fake_2]):
             image_path = r".\images\generated\{:02d}.jpg".format(i+1)
             original_image = QPixmap(image_path).scaledToHeight(image_size)
             label.setPixmap(original_image)
@@ -290,6 +322,16 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
             convert = QImage(image, image.shape[1], image.shape[0], image.strides[0], QImage.Format.Format_BGR888)
             self.image_webcam.setPixmap(QPixmap.fromImage(convert))
 
+    def update_fake_video_image(self):
+        ret, image = self.deep_fake_video.read()
+        if ret:
+            resize_ratio = np.min([self.label_2.size().width()/image.shape[1],
+                                   self.label_2.size().height()/image.shape[0]])
+            image = cv2.resize(image, dsize=(int(image.shape[1]*resize_ratio), int(image.shape[0]*resize_ratio)))
+            self.recorded_image = image
+            convert = QImage(image, image.shape[1], image.shape[0], image.strides[0], QImage.Format.Format_BGR888)
+            self.label_2.setPixmap(QPixmap.fromImage(convert))
+
     def update_background_image(self):
         ret, image = self.background_clip.read()
         cv2.imwrite("./images/background_image.png", image)
@@ -303,10 +345,10 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         if not self.opt:
             torch.nn.Module.dump_patches = True
             self.opt = FaceDetectionOptions()
-        if not self.face_swap_model or True:
+        if not self.face_swap_model:
             self.face_swap_model = create_model(self.opt)
             self.face_swap_model.eval()
-        if not self.face_det_model or True:
+        if not self.face_det_model:
             self.face_det_model = Face_detect_crop(name='antelope')
             self.face_det_model.prepare(ctx_id=0, det_size=(640, 640), mode='None')
         if not self.mask_net and self.opt.use_mask:
@@ -376,7 +418,6 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
             face_image_tensor_norm = spNorm(face_image_tensor)
             face_image_tensor_norm = F.interpolate(face_image_tensor_norm, size=(112, 112))
             face_id = self.face_swap_model.netArc(face_image_tensor_norm)
-            print(face_id)
 
             id_errors.append(mse(face_id, self.target_id).detach().cpu().numpy())
             image_tensor_list.append(face_image_tensor)
@@ -384,7 +425,6 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         id_errors_array = np.array(id_errors)
         min_index = np.argmin(id_errors_array)
         min_value = id_errors_array[min_index]
-        print(min_value)
 
         if min_value < self.opt.id_thres or np.isnan(min_value):
             swap_result = self.face_swap_model(None, image_tensor_list[min_index], self.source_id, None, True)[0]
@@ -394,6 +434,79 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
                                                      self.opt.crop_size, target_image, parsing_model=self.mask_net,
                                                      use_mask=self.opt.use_mask, norm=spNorm)
             return final_image
+
+    def face_swap_video(self, target_path, temp_results_dir="./temp"):
+        # Open Video File
+        video_audio_clip = AudioFileClip(target_path)
+        video = cv2.VideoCapture(target_path)
+
+        # Get Video Information
+        frame_count = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = video.get(cv2.CAP_PROP_FPS)
+        self.video_fps = fps
+        yield frame_count
+
+        # Delete temporary folder and recreate
+        if os.path.exists(temp_results_dir):
+            shutil.rmtree(temp_results_dir)
+        if not os.path.exists(temp_results_dir):
+            os.mkdir(temp_results_dir)
+
+        # Iterate through the video
+        for frame_index in range(frame_count):
+            ret, frame = video.read()
+            if ret:
+                # Detect faces in the image
+                detection_result = self.face_det_model.get(frame, self.opt.crop_size)
+
+                if detection_result is not None:
+                    face_image_list, image_mat_list = detection_result[0], detection_result[1]
+
+                    id_errors = []
+                    image_tensor_list = []
+                    for face_image in face_image_list:
+                        face_image_tensor = _to_tensor(cv2.cvtColor(face_image, cv2.COLOR_BGR2RGB))[None, ...].cuda()
+
+                        face_image_tensor_norm = spNorm(face_image_tensor)
+                        face_image_tensor_norm = F.interpolate(face_image_tensor_norm, size=(112, 112))
+                        face_id = self.face_swap_model.netArc(face_image_tensor_norm)
+
+                        id_errors.append(mse(face_id, self.target_id).detach().cpu().numpy())
+                        image_tensor_list.append(face_image_tensor)
+
+                    id_errors_array = np.array(id_errors)
+                    min_index = np.argmin(id_errors_array)
+                    min_value = id_errors_array[min_index]
+
+                    if min_value < self.opt.id_thres or np.isnan(min_value):
+                        swap_result = \
+                            self.face_swap_model(None, image_tensor_list[min_index], self.source_id, None, True)[0]
+
+                        final_image = self.reverse_2_whole_image(image_tensor_list[min_index], swap_result,
+                                                                 image_mat_list[min_index],
+                                                                 self.opt.crop_size, frame,
+                                                                 parsing_model=self.mask_net,
+                                                                 use_mask=self.opt.use_mask, norm=spNorm)
+                    else:
+                        final_image = frame.astype(np.uint8)
+                else:
+                    final_image = frame.astype(np.uint8)
+
+                cv2.imwrite(os.path.join(temp_results_dir, 'frame_{:07d}.jpg'.format(frame_index)), final_image)
+                print(frame_index)
+                yield frame_index
+            else:
+                break
+
+        video.release()
+        path = os.path.join(temp_results_dir, '*.jpg')
+        image_filenames = sorted(glob.glob(path))
+
+        video_clip = ImageSequenceClip(image_filenames, fps=fps)
+        video_clip = video_clip.set_audio(video_audio_clip)
+        video_clip.write_videofile("./videos/generated/scene.mp4", audio_codec='aac')
+        # video_audio_clip = AudioFileClip(target_path)
+        yield np.nan
 
     def reverse_2_whole_image(self, image_tensor, swapped_image, image_mat, crop_size, original_image,
                               parsing_model=None, norm=None, use_mask=False):
@@ -425,7 +538,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
             out = parsing_model(source_img_512)[0]
             parsing = out.squeeze(0).detach().cpu().numpy().argmax(0)
             vis_parsing_anno = parsing.copy().astype(np.uint8)
-            target_mask = encode_segmentation_rgb(vis_parsing_anno)
+            target_mask = encode_segmentation_rgb(vis_parsing_anno, no_neck=False)
             if target_mask.sum() >= 5000:
                 target_mask = cv2.resize(target_mask, (crop_size, crop_size))
                 target_image_parsing = self.postprocess(swapped_img,
@@ -435,7 +548,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
             else:
                 target_image = cv2.warpAffine(swapped_image, mat_rev, original_size)[..., ::-1]
         else:
-            target_image = cv2.warpAffine(swapped_image, mat_rev, original_size)
+            # ToDo: Fix
+            target_image = cv2.warpAffine(swapped_image.astype(np.uint8), mat_rev, original_size)
 
         img_white = cv2.warpAffine(img_white, mat_rev, original_size)
         img_white[img_white > 20] = 255
