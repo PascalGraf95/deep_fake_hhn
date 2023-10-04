@@ -2,7 +2,7 @@ from PIL import Image
 import os
 
 # Directory containing the images you want to crop
-input_directory = "images/scenes/03"
+input_directory = "images/scenes/07"
 
 
 # Function to crop an image to its center square

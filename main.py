@@ -26,6 +26,21 @@ from simswap.insightface_func.face_detect_crop_multi import Face_detect_crop
 # from simswap.util.videoswap_specific import video_swap
 import os
 from simswap.parsing_model.model import BiSeNet
+from reenactment import depth
+import imageio
+from skimage.transform import resize
+from skimage import img_as_ubyte
+from scipy.spatial import ConvexHull
+import reenactment.modules.generator as GEN
+from reenactment.modules.keypoint_detector import KPDetector
+from collections import OrderedDict
+import yaml
+from reenactment.sync_batchnorm import DataParallelWithCallback
+from reenactment.animate import normalize_kp
+from crop_video import process_video
+import subprocess
+import shlex
+
 
 mse = torch.nn.MSELoss().cuda()
 spNorm = SpecificNorm()
@@ -34,7 +49,6 @@ transformer_Arcface = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
-
 
 def _to_tensor(array):
     tensor = torch.from_numpy(array)
@@ -93,7 +107,7 @@ class FaceDetectionOptions:
     arc_path = 'simswap/arcface_model/arcface_checkpoint.tar'
     temp_path = './simswap/temp_results'
     output_path = './output/'
-    id_thres = 0.04
+    id_thres = 0.05
     crop_size = 224
     is_train = False
     use_mask = True
@@ -123,10 +137,11 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         self.setupUi(self)
         self.showFullScreen()
 
-        # region Bug Fix
+        # region - Bug Fix -
         self.tool_box.setCurrentIndex(1)
-        time.sleep(0.5)
+        time.sleep(0.1)
         self.tool_box.setCurrentIndex(0)
+        # endregion
 
         # region - Internal Variables -
         # Simswap Objects
@@ -134,6 +149,10 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         self.face_swap_model = None
         self.face_det_model = None
         self.mask_net = None
+        self.force_rebuild = False
+        # Reenactment Objects
+        self.depth_encoder = None
+        self.depth_decoder = None
         # Encoded Faces & Images
         self.source_face = None
         self.source_id = None
@@ -141,45 +160,44 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         self.target_id = None
         # region State Variables and Objects
         self.selected_clip = 0
+        self.selected_input = 0
         self.recorded_image = None
-        self.movie = QMovie("./loader.gif")
+        self.loading_animation = QMovie("./loader.gif")
+        self.your_face_here = cv2.imread("./images/logos/your_face_here.png", cv2.IMREAD_UNCHANGED)
+        self.your_face_here = cv2.resize(self.your_face_here, (645, 600))
         self.video_fps = 30
         self.deep_fake_video = None
         # self.background_clip = QMovie()
         self.camera = cv2.VideoCapture(0)
-        self.background_clip = cv2.VideoCapture("./videos/distant_particles_loop.mp4")
+        self.record_mode = False
+        self.recording_path = "temp_recording"
+        # endregion
+
+        # region Model Initialization
+        self.initialize_models()
         # endregion
 
         # region Initial Label States
-        hhn_logo = QPixmap("./images/logos/hhn_logo.png").scaledToHeight(150)
-        self.image_hhn_logo.setPixmap(hhn_logo)
-        saai_logo = QPixmap("./images/logos/saai_logo.png").scaledToHeight(150)
-        self.image_saai_logo.setPixmap(saai_logo)
+        header = QPixmap("./images/logos/Header.png").scaledToWidth(self.label_title.width())
+        self.label_title.setPixmap(header)
 
-        self.image_scaling = 0.8
-        self.image_preview_1.setMargin(5)
-        preview_image_01 = QPixmap("./images/preview/01_Titanic.jpg").scaledToHeight(
-            int(self.image_preview_1.height()*self.image_scaling))
-        self.image_preview_1.setPixmap(preview_image_01)
+        self.image_scaling = 0.7
+        for idx, preview_image in enumerate([self.image_preview_1, self.image_preview_2, self.image_preview_3,
+                                             self.image_preview_4, self.image_preview_5, self.image_preview_6,
+                                             self.image_preview_7, self.image_preview_8, self.image_preview_9]):
+            preview_image.setMargin(5)
+            preview_image_pixmap = QPixmap("./images/preview/{:02d}.jpg".format(idx+1)).scaledToHeight(
+                int(self.image_preview_1.height()*self.image_scaling))
+            preview_image.setPixmap(preview_image_pixmap)
 
-        self.image_preview_2.setMargin(5)
-        preview_image_02 = QPixmap("./images/preview/02_Braveheart.jpg").scaledToHeight(
-            int(self.image_preview_2.height()*self.image_scaling))
-        self.image_preview_2.setPixmap(preview_image_02)
-
-        self.image_preview_3.setMargin(5)
-        preview_image_03 = QPixmap("./images/preview/03_FluchDerKaribik.jpg").scaledToHeight(
-            int(self.image_preview_3.height()*self.image_scaling))
-        self.image_preview_3.setPixmap(preview_image_03)
-
-        self.image_preview_4.setMargin(5)
-        preview_image_04 = QPixmap("./images/preview/04_TheOffice.jpg").scaledToHeight(
-            int(self.image_preview_4.height()*self.image_scaling))
-        self.image_preview_4.setPixmap(preview_image_04)
-
+        for idx, input_image in enumerate([self.image_input_1, self.image_input_2, self.image_input_3,
+                                             self.image_input_4, self.image_input_5, self.image_input_6,
+                                             self.image_input_7, self.image_input_8, self.image_input_9]):
+            input_image.setMargin(5)
+            input_image_pixmap = QPixmap("./images/input/{:02d}.jpg".format(idx+1)).scaledToHeight(
+                int(self.image_preview_1.height()*self.image_scaling))
+            input_image.setPixmap(input_image_pixmap)
         # endregion
-
-
         # endregion
 
         # region - Events -
@@ -188,14 +206,32 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         self.button_preview_2.clicked.connect(lambda: self.select_clip(2))
         self.button_preview_3.clicked.connect(lambda: self.select_clip(3))
         self.button_preview_4.clicked.connect(lambda: self.select_clip(4))
+        self.button_preview_5.clicked.connect(lambda: self.select_clip(5))
+        self.button_preview_6.clicked.connect(lambda: self.select_clip(6))
+        self.button_preview_7.clicked.connect(lambda: self.select_clip(7))
+        self.button_preview_8.clicked.connect(lambda: self.select_clip(8))
+        self.button_preview_9.clicked.connect(lambda: self.select_clip(9))
+        # endregion
+
+        # region Input Selection
+        self.button_face_1.clicked.connect(lambda: self.select_input(1))
+        self.button_face_2.clicked.connect(lambda: self.select_input(2))
+        self.button_face_3.clicked.connect(lambda: self.select_input(3))
+        self.button_face_4.clicked.connect(lambda: self.select_input(4))
+        self.button_face_5.clicked.connect(lambda: self.select_input(5))
+        self.button_face_6.clicked.connect(lambda: self.select_input(6))
+        self.button_face_7.clicked.connect(lambda: self.select_input(7))
+        self.button_face_8.clicked.connect(lambda: self.select_input(8))
+        self.button_face_9.clicked.connect(lambda: self.select_input(9))
         # endregion
 
         # region Other Events
         self.button_generate.clicked.connect(self.generate)
         self.tool_box.currentChanged.connect(self.change_tool_box)
+        self.tab_widget_input.currentChanged.connect(self.change_tabs)
+        self.combo_box_model.currentIndexChanged.connect(self.change_combo_model)
+        self.push_button_play.clicked.connect(self.replay_video)
         # endregion
-
-
         # endregion
 
         # region - Timers and Live Images -
@@ -208,93 +244,222 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         self.deep_fake_video_timer = QTimer()
         self.deep_fake_video_timer.timeout.connect(self.update_fake_video_image)
 
-
-        # self.background_image_timer = QTimer()
-        # self.background_image_timer.timeout.connect(self.update_background_image)
-        # self.background_image_timer.start(30)
+        # Setup record
+        self.stop_recording_timer = QTimer()
+        self.stop_recording_timer.timeout.connect(self.stop_recording)
         # endregion
 
-    # region Button Events
+        # ToDo: Fix Video Audio
+        # ToDo: Fix Reenactment FPS
+        # ToDo: Other Inception Video
+        # ToDo: Better Reenactment Images
+        # ToDo: Img Size Output
+        # ToDo: GIVE AWAY?!
+        # ToDo: Other Trump Video
+
+    # region Initialization
+    def initialize_models(self):
+        if not self.opt:
+            torch.nn.Module.dump_patches = True
+            self.opt = FaceDetectionOptions()
+        if not self.face_swap_model or self.force_rebuild:
+            self.face_swap_model = create_model(self.opt)
+            self.face_swap_model.eval()
+            self.force_rebuild = False
+        if not self.face_det_model:
+            self.face_det_model = Face_detect_crop(name='antelope')
+            self.face_det_model.prepare(ctx_id=0, det_size=(640, 640), mode='None')
+        if not self.mask_net and self.opt.use_mask:
+            n_classes = 19
+            self.mask_net = BiSeNet(n_classes=n_classes)
+            self.mask_net.cuda()
+            model_path = os.path.join('./simswap/parsing_model/checkpoint', '79999_iter.pth')
+            self.mask_net.load_state_dict(torch.load(model_path))
+            self.mask_net.eval()
+        if not self.depth_decoder:
+            self.depth_encoder = depth.ResnetEncoder(18, False)
+            self.depth_decoder = depth.DepthDecoder(num_ch_enc=self.depth_encoder.num_ch_enc, scales=range(4))
+            loaded_dict_enc = torch.load('reenactment/depth/models/depth_face_model/encoder.pth')
+            loaded_dict_dec = torch.load('reenactment/depth/models/depth_face_model/depth.pth')
+            filtered_dict_enc = {k: v for k, v in loaded_dict_enc.items() if k in self.depth_encoder.state_dict()}
+            self.depth_encoder.load_state_dict(filtered_dict_enc)
+            self.depth_decoder.load_state_dict(loaded_dict_dec)
+            self.depth_encoder.eval()
+            self.depth_decoder.eval()
+
+            self.depth_encoder.cuda()
+            self.depth_decoder.cuda()
+    # endregion
+
+    # region Events
     def select_clip(self, idx):
         self.selected_clip = idx
         if idx == 1:
             self.image_preview_1.setStyleSheet(selected_style_sheet)
         else:
             self.image_preview_1.setStyleSheet(default_style_sheet)
-
         if idx == 2:
             self.image_preview_2.setStyleSheet(selected_style_sheet)
         else:
             self.image_preview_2.setStyleSheet(default_style_sheet)
-
         if idx == 3:
             self.image_preview_3.setStyleSheet(selected_style_sheet)
         else:
             self.image_preview_3.setStyleSheet(default_style_sheet)
-
         if idx == 4:
             self.image_preview_4.setStyleSheet(selected_style_sheet)
         else:
             self.image_preview_4.setStyleSheet(default_style_sheet)
+        if idx == 5:
+            self.image_preview_5.setStyleSheet(selected_style_sheet)
+        else:
+            self.image_preview_5.setStyleSheet(default_style_sheet)
+        if idx == 6:
+            self.image_preview_6.setStyleSheet(selected_style_sheet)
+        else:
+            self.image_preview_6.setStyleSheet(default_style_sheet)
+        if idx == 7:
+            self.image_preview_7.setStyleSheet(selected_style_sheet)
+        else:
+            self.image_preview_7.setStyleSheet(default_style_sheet)
+        if idx == 8:
+            self.image_preview_8.setStyleSheet(selected_style_sheet)
+        else:
+            self.image_preview_8.setStyleSheet(default_style_sheet)
+        if idx == 9:
+            self.image_preview_9.setStyleSheet(selected_style_sheet)
+        else:
+            self.image_preview_9.setStyleSheet(default_style_sheet)
+
+    def select_input(self, idx):
+        self.selected_input = idx
+        if idx == 1:
+            self.image_input_1.setStyleSheet(selected_style_sheet)
+        else:
+            self.image_input_1.setStyleSheet(default_style_sheet)
+        if idx == 2:
+            self.image_input_2.setStyleSheet(selected_style_sheet)
+        else:
+            self.image_input_2.setStyleSheet(default_style_sheet)
+        if idx == 3:
+            self.image_input_3.setStyleSheet(selected_style_sheet)
+        else:
+            self.image_input_3.setStyleSheet(default_style_sheet)
+        if idx == 4:
+            self.image_input_4.setStyleSheet(selected_style_sheet)
+        else:
+            self.image_input_4.setStyleSheet(default_style_sheet)
+        if idx == 5:
+            self.image_input_5.setStyleSheet(selected_style_sheet)
+        else:
+            self.image_input_5.setStyleSheet(default_style_sheet)
+        if idx == 6:
+            self.image_input_6.setStyleSheet(selected_style_sheet)
+        else:
+            self.image_input_6.setStyleSheet(default_style_sheet)
+        if idx == 7:
+            self.image_input_7.setStyleSheet(selected_style_sheet)
+        else:
+            self.image_input_7.setStyleSheet(default_style_sheet)
+        if idx == 8:
+            self.image_input_8.setStyleSheet(selected_style_sheet)
+        else:
+            self.image_input_8.setStyleSheet(default_style_sheet)
+        if idx == 9:
+            self.image_input_9.setStyleSheet(selected_style_sheet)
+        else:
+            self.image_input_9.setStyleSheet(default_style_sheet)
 
     def generate(self):
+        self.progress_bar.setValue(0)
+        self.initialize_models()
+        self.label_deep_fake_video.clear()
+        self.deep_fake_video = None
         if self.selected_clip == 0:
             return
-        if self.tool_box.currentIndex() == 0:
-            # Deactivate tool box while operating
-            self.tool_box.setEnabled(False)
-
-            # 1. Initialize Simswap Models
-            self.initialize_models()
-            self.progress_bar.setValue(25)
-
-            # 2. Detect & encode face in recorded image and target images
-            self.encode_face_in_webcam_image()
-            self.encode_target_face(r".\images\scenes\{:02d}\target_face.jpg".format(self.selected_clip))
-            self.progress_bar.setValue(50)
-
-            # 3. Apply Face Swap for three images of the selected scene
-            for i, value in enumerate([75, 100]):
-                final_image = self.face_swap_image(r".\images\scenes\{:02d}\{:02d}.jpg".format(self.selected_clip, i+1))
-                cv2.imwrite(r".\images\generated\{:02d}.jpg".format(i+1), final_image)
-                self.progress_bar.setValue(value)
-
-            # 4. Switch to Output UI & show image results
-            self.tool_box.setEnabled(True)
-            self.tool_box_page_2.setEnabled(True)
-            self.set_output_images()
-
-            self.tool_box.setCurrentIndex(1)
-            self.progress_bar.setValue(0)
-            self.tool_box.repaint()
-
-            # 5. Meanwhile, apply Face Swap to the whole video in background
-            first_yield = True
-            frame_count = 0
-            for i in self.face_swap_video(r".\videos\scenes\{:02d}\scene.mp4".format(self.selected_clip)):
-                if first_yield:
-                    frame_count = i
-                    first_yield = False
-                if np.isnan(i):
-                    break
-                self.tool_box.repaint()
-                self.progress_bar.setValue(int(i/frame_count*100))
-                
-            # 6. Show Results
-            self.deep_fake_video = cv2.VideoCapture(r".\videos\generated\scene.mp4")
-            self.deep_fake_video_timer.start(30)
-            self.progress_bar.setValue(0)
-
-        elif self.tool_box.currentIndex() == 1:
-            self.tool_box.setCurrentIndex(0)
+        if self.tab_widget_input.currentIndex() == 1 and self.selected_input == 0:
+            return
+        if self.tab_widget_input.currentIndex() == 1 and self.radio_button_reenactment.isChecked():
+            return
+        if self.radio_button_simswap.isChecked():
+            self.generate_simswap()
+        elif self.radio_button_reenactment.isChecked():
+            self.generate_face_reenactment()
 
     def change_tool_box(self):
         if self.tool_box.currentIndex() == 0:
-            self.select_clip(0)
             self.button_generate.setText("Generate")
+            self.live_image_timer.start(30)
         elif self.tool_box.currentIndex() == 1:
             self.button_generate.setText("Try Again")
+            self.live_image_timer.stop()
 
+    def change_tabs(self):
+        if self.tab_widget_input.currentIndex() == 0:
+            self.live_image_timer.start(30)
+        elif self.tab_widget_input.currentIndex() == 2:
+            self.live_image_timer.stop()
+            self.radio_button_simswap.setChecked(True)
+
+    def change_combo_model(self):
+        if self.combo_box_model.currentIndex() == 0:
+            self.opt.name = "224"
+        elif self.combo_box_model.currentIndex() == 1:
+            self.opt.name = "230929"
+        self.force_rebuild = True
+
+    def replay_video(self):
+        if self.deep_fake_video:
+            self.deep_fake_video.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            self.deep_fake_video_timer.start(30)
+    # endregion
+
+    # region Live Images
+    def update_webcam_image(self):
+        ret, image = self.camera.read()
+        if ret:
+            resize_ratio = np.min([self.image_webcam.size().width()*0.95/image.shape[1],
+                                   self.image_webcam.size().height()*0.95/image.shape[0]])
+            image = cv2.resize(image, dsize=(int(image.shape[1]*resize_ratio), int(image.shape[0]*resize_ratio)))
+            self.recorded_image = image.copy()
+
+            cy = int(image.shape[0] * 0.5 - self.your_face_here.shape[0] * 0.5)
+            cx = int(image.shape[1] * 0.5 - self.your_face_here.shape[1] * 0.5)
+            y1, y2 = cy, cy + self.your_face_here.shape[0]
+            x1, x2 = cx, cx + self.your_face_here.shape[1]
+
+            alpha_s = self.your_face_here[:, :, 3] / 255.0
+            alpha_l = 1.0 - alpha_s
+            for c in range(0, 3):
+                image[y1:y2, x1:x2, c] = (alpha_s * self.your_face_here[:, :, c] +
+                                          alpha_l * image[y1:y2, x1:x2, c])
+
+            convert = QImage(image, image.shape[1], image.shape[0], image.strides[0], QImage.Format.Format_BGR888)
+            self.image_webcam.setPixmap(QPixmap.fromImage(convert))
+
+            if self.record_mode:
+                if not os.path.isdir(self.recording_path):
+                    os.makedirs(self.recording_path)
+                img_to_save = cv2.resize(self.recorded_image, (self.recorded_image.shape[1]//2, self.recorded_image.shape[0]//2))
+                data_name = "{:04d}.jpg".format(len(os.listdir(self.recording_path)))
+                cv2.imwrite(os.path.join(self.recording_path, data_name), img_to_save)
+
+    def update_fake_video_image(self):
+        if not self.deep_fake_video:
+            self.deep_fake_video_timer.stop()
+            return
+        ret, image = self.deep_fake_video.read()
+        if ret:
+            resize_ratio = np.min([self.label_deep_fake_video.size().width()/image.shape[1],
+                                   self.label_deep_fake_video.size().height()/image.shape[0]])
+            image = cv2.resize(image, dsize=(int(image.shape[1]*resize_ratio), int(image.shape[0]*resize_ratio)))
+            convert = QImage(image, image.shape[1], image.shape[0], image.strides[0], QImage.Format.Format_BGR888)
+            self.label_deep_fake_video.setPixmap(QPixmap.fromImage(convert))
+        else:
+            self.deep_fake_video_timer.stop()
+    # endregion
+
+    # region Misc Functions
     def set_output_images(self):
         image_size = np.clip(int(self.label_original_1.height()), 220, 500)
 
@@ -309,95 +474,308 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
             image_path = r".\images\generated\{:02d}.jpg".format(i+1)
             original_image = QPixmap(image_path).scaledToHeight(image_size)
             label.setPixmap(original_image)
+
+    def clear_output_images(self):
+        self.label_original_1.clear()
+        self.label_original_2.clear()
+        self.label_deep_fake_1.clear()
+        self.label_deep_fake_2.clear()
+
+    def stop_recording(self):
+        self.record_mode = False
+        self.generate_face_reenactment(video_recorded=True)
+        self.stop_recording_timer.stop()
+
+        self.your_face_here = cv2.imread("./images/logos/your_face_here.png", cv2.IMREAD_UNCHANGED)
+        self.your_face_here = cv2.resize(self.your_face_here, (645, 600))
     # endregion
 
-    # region Live Images
-    def update_webcam_image(self):
-        ret, image = self.camera.read()
-        if ret:
-            resize_ratio = np.min([self.image_webcam.size().width()/image.shape[1],
-                                   self.image_webcam.size().height()/image.shape[0]])
-            image = cv2.resize(image, dsize=(int(image.shape[1]*resize_ratio), int(image.shape[0]*resize_ratio)))
-            self.recorded_image = image
-            convert = QImage(image, image.shape[1], image.shape[0], image.strides[0], QImage.Format.Format_BGR888)
-            self.image_webcam.setPixmap(QPixmap.fromImage(convert))
+    # region Generation Functions
+    def generate_simswap(self):
+        if self.tool_box.currentIndex() == 0:
+            # 1. Deactivate tool box while operating
+            self.tool_box.setEnabled(False)
 
-    def update_fake_video_image(self):
-        ret, image = self.deep_fake_video.read()
-        if ret:
-            resize_ratio = np.min([self.label_2.size().width()/image.shape[1],
-                                   self.label_2.size().height()/image.shape[0]])
-            image = cv2.resize(image, dsize=(int(image.shape[1]*resize_ratio), int(image.shape[0]*resize_ratio)))
-            self.recorded_image = image
-            convert = QImage(image, image.shape[1], image.shape[0], image.strides[0], QImage.Format.Format_BGR888)
-            self.label_2.setPixmap(QPixmap.fromImage(convert))
+            # 2. Detect & encode face in recorded image and target images
+            self.encode_face_in_webcam_image()
+            self.encode_target_face(r".\images\scenes\{:02d}\target_face.jpg".format(self.selected_clip))
+            self.progress_bar.setValue(50)
 
-    def update_background_image(self):
-        ret, image = self.background_clip.read()
-        cv2.imwrite("./images/background_image.png", image)
-        stylesheet = 'background-image: url("./images/background_image.png");'
-        self.centralwidget.setStyleSheet(stylesheet)
+            # 3. Apply Face Swap for three images of the selected scene
+            for i, value in enumerate([75, 100]):
+                final_image = self.face_swap_image(
+                    r".\images\scenes\{:02d}\{:02d}.jpg".format(self.selected_clip, i + 1))
+                final_image = cv2.resize(final_image, (512, 512))
+                source_face_rescaled = cv2.resize(self.source_face, (128, 128))
+                final_image[0:128, 0:128] = source_face_rescaled
+                cv2.imwrite(r".\images\generated\{:02d}.jpg".format(i + 1), final_image)
+                self.progress_bar.setValue(value)
+
+            # 4. Switch to Output UI & show image results
+            self.tool_box.setEnabled(True)
+            self.tool_box_page_2.setEnabled(True)
+            self.set_output_images()
+
+            self.tool_box.setCurrentIndex(1)
+            self.progress_bar.setValue(0)
+            self.tool_box.repaint()
+
+            # 5. Meanwhile, apply Face Swap to the whole video in background
+            if not os.path.isfile(r".\videos\scenes\{:02d}\scene.mp4".format(self.selected_clip)):
+                return
+
+            # 1.5 If in Input Image mode, check if the video has been generated already
+            if os.path.isfile("./videos/generated/pregenerated/{:02d}_{:02d}.mp4".format(self.selected_input,
+                                                                                         self.selected_clip)):
+                self.deep_fake_video = cv2.VideoCapture(r"./videos/generated/pregenerated/{:02d}_{:02d}.mp4".format(self.selected_input,
+                                                                                         self.selected_clip))
+            elif not self.check_box_video.isChecked():
+                return
+            else:
+                first_yield = True
+                frame_count = 0
+                for i in self.face_swap_video(r".\videos\scenes\{:02d}\scene.mp4".format(self.selected_clip)):
+                    if first_yield:
+                        frame_count = i
+                        first_yield = False
+                    if np.isnan(i):
+                        break
+                    self.tool_box.repaint()
+                    self.progress_bar.setValue(int(i / frame_count * 100))
+
+                # 6. Show Results
+                self.deep_fake_video = cv2.VideoCapture(r".\videos\generated\scene.mp4")
+            self.deep_fake_video_timer.start(30)
+            self.progress_bar.setValue(0)
+
+        elif self.tool_box.currentIndex() == 1:
+            self.tool_box.setCurrentIndex(0)
+
+    def generate_face_reenactment(self, video_recorded=False):
+        if self.tool_box.currentIndex() == 0:
+            # 1. Start Recording
+            if not video_recorded:
+                if os.path.isdir(self.recording_path):
+                    shutil.rmtree(self.recording_path)
+                self.record_mode = True
+                self.stop_recording_timer.start(6000)
+                self.your_face_here = cv2.imread("./images/logos/your_face_here_recording.png", cv2.IMREAD_UNCHANGED)
+                self.your_face_here = cv2.resize(self.your_face_here, (645, 600))
+
+                return
+
+            # 2. Deactivate tool box while operating
+            self.tool_box.setEnabled(False)
+            self.progress_bar.setValue(10)
+
+            # 3. Extract face from recorded frames
+            files = os.listdir(self.recording_path)
+            files = [os.path.join(self.recording_path, f) for f in files]
+            images = [cv2.cvtColor(cv2.imread(f), cv2.COLOR_BGR2RGB) for f in files]
+
+            imageio.mimsave("target.mp4", [img_as_ubyte(i) for i in images], fps=12)
+            commands = process_video("target.mp4")
+            self.progress_bar.setValue(25)
+            subprocess.run(shlex.split(commands[0]))
+            self.progress_bar.setValue(50)
+
+            # 4. Create Face Reenactment
+            self.create_reenactment()
+            self.progress_bar.setValue(100)
+
+            # 5. Switch to Output UI & show image results
+            self.tool_box.setEnabled(True)
+            self.tool_box_page_2.setEnabled(True)
+            self.clear_output_images()
+
+            self.tool_box.setCurrentIndex(1)
+            self.progress_bar.setValue(0)
+            self.tool_box.repaint()
+
+            self.deep_fake_video = cv2.VideoCapture(r".\videos\generated\reenactment.mp4")
+            self.deep_fake_video_timer.start(30)
+        elif self.tool_box.currentIndex() == 1:
+            self.tool_box.setCurrentIndex(0)
+    # endregion
+
+    # region Reenactment Misc Functions
+    def create_reenactment(self, find_best=True, relative=True, adapt_scale=False):
+        source_image = imageio.v3.imread(r".\images\scenes\{:02d}\source.jpg".format(self.selected_clip))
+        reader = imageio.get_reader("crop.mp4")
+        fps = reader.get_meta_data()['fps']
+        driving_video = []
+        try:
+            for im in reader:
+                driving_video.append(im)
+        except RuntimeError:
+            pass
+        reader.close()
+
+        source_image = resize(source_image, (256, 256))[..., :3]
+        driving_video = [resize(frame, (256, 256))[..., :3] for frame in driving_video]
+        generator, kp_detector = self.load_checkpoints(config_path="reenactment/config/vox-adv-256.yaml",
+                                                       checkpoint_path="reenactment/models/DaGAN_vox_adv_256.pth.tar",
+                                                       cpu=False)
+        if find_best:
+            i = find_best_frame(source_image, driving_video)
+            print("Best frame: " + str(i))
+            driving_forward = driving_video[i:]
+            driving_backward = driving_video[:(i + 1)][::-1]
+            sources_forward, drivings_forward, predictions_forward, depth_forward = \
+                self.make_animation(source_image,
+                                    driving_forward,
+                                    generator,
+                                    kp_detector,
+                                    relative=relative,
+                                    adapt_movement_scale=adapt_scale,
+                                    cpu=False)
+            sources_backward, drivings_backward, predictions_backward, depth_backward = \
+                self.make_animation(source_image,
+                                    driving_backward,
+                                    generator,
+                                    kp_detector,
+                                    relative=relative,
+                                    adapt_movement_scale=adapt_scale,
+                                    cpu=False)
+            predictions = predictions_backward[::-1] + predictions_forward[1:]
+            sources = sources_backward[::-1] + sources_forward[1:]
+            drivings = drivings_backward[::-1] + drivings_forward[1:]
+            depth_gray = depth_backward[::-1] + depth_forward[1:]
+        else:
+            sources, drivings, predictions, depth_gray = self.make_animation(source_image, driving_video, generator,
+                                                                             kp_detector, relative=relative,
+                                                                             adapt_movement_scale=adapt_scale,
+                                                                             cpu=False)
+        final_images = []
+        for p, d, g in zip(predictions, drivings, depth_gray):
+            g = cv2.cvtColor(g, cv2.COLOR_GRAY2RGB)
+            final_images.append(np.concatenate([d, g, p], axis=1))
+
+        imageio.mimsave("videos/generated/reenactment.mp4", [img_as_ubyte(im) for im in final_images], fps=fps)
+
+    def load_checkpoints(self, config_path, checkpoint_path, cpu=False):
+        with open(config_path) as f:
+            config = yaml.load(f, Loader=yaml.FullLoader)
+        config['model_params']['common_params']['num_kp'] = 15
+        generator = getattr(GEN, "DepthAwareGenerator")(**config['model_params']['generator_params'],
+                                                         **config['model_params']['common_params'])
+        if not cpu:
+            generator.cuda()
+        config['model_params']['common_params']['num_channels'] = 4
+        kp_detector = KPDetector(**config['model_params']['kp_detector_params'],
+                                 **config['model_params']['common_params'])
+        if not cpu:
+            kp_detector.cuda()
+        if cpu:
+            checkpoint = torch.load(checkpoint_path, map_location=torch.device('cpu'))
+        else:
+            checkpoint = torch.load(checkpoint_path, map_location="cuda:0")
+
+        ckp_generator = OrderedDict((k.replace('module.', ''), v) for k, v in checkpoint['generator'].items())
+        generator.load_state_dict(ckp_generator)
+        ckp_kp_detector = OrderedDict((k.replace('module.', ''), v) for k, v in checkpoint['kp_detector'].items())
+        kp_detector.load_state_dict(ckp_kp_detector)
+
+        if not cpu:
+            generator = DataParallelWithCallback(generator)
+            kp_detector = DataParallelWithCallback(kp_detector)
+
+        generator.eval()
+        kp_detector.eval()
+
+        return generator, kp_detector
+
+    def make_animation(self, source_image, driving_video, generator, kp_detector,
+                       relative=True, adapt_movement_scale=True,
+                       cpu=False):
+        sources = []
+        drivings = []
+        with torch.no_grad():
+            predictions = []
+            depth_gray = []
+            source = torch.tensor(source_image[np.newaxis].astype(np.float32)).permute(0, 3, 1, 2)
+            driving = torch.tensor(np.array(driving_video)[np.newaxis].astype(np.float32)).permute(0, 4, 1, 2, 3)
+            if not cpu:
+                source = source.cuda()
+                driving = driving.cuda()
+            outputs = self.depth_decoder(self.depth_encoder(source))
+            depth_source = outputs[("disp", 0)]
+
+            outputs = self.depth_decoder(self.depth_encoder(driving[:, :, 0]))
+            depth_driving = outputs[("disp", 0)]
+            source_kp = torch.cat((source, depth_source), 1)
+            driving_kp = torch.cat((driving[:, :, 0], depth_driving), 1)
+
+            kp_source = kp_detector(source_kp)
+            kp_driving_initial = kp_detector(driving_kp)
+
+            for frame_idx in tqdm(range(driving.shape[2])):
+                driving_frame = driving[:, :, frame_idx]
+
+                if not cpu:
+                    driving_frame = driving_frame.cuda()
+                outputs = self.depth_decoder(self.depth_encoder(driving_frame))
+                depth_map = outputs[("disp", 0)]
+
+                gray_driving = np.transpose(depth_map.data.cpu().numpy(), [0, 2, 3, 1])[0]
+                gray_driving = 1 - gray_driving / np.max(gray_driving)
+
+                frame = torch.cat((driving_frame, depth_map), 1)
+                kp_driving = kp_detector(frame)
+
+                kp_norm = normalize_kp(kp_source=kp_source, kp_driving=kp_driving,
+                                       kp_driving_initial=kp_driving_initial, use_relative_movement=relative,
+                                       use_relative_jacobian=relative, adapt_movement_scale=adapt_movement_scale)
+                out = generator(source, kp_source=kp_source, kp_driving=kp_norm, source_depth=depth_source,
+                                driving_depth=depth_map)
+
+                drivings.append(np.transpose(driving_frame.data.cpu().numpy(), [0, 2, 3, 1])[0])
+                sources.append(np.transpose(source.data.cpu().numpy(), [0, 2, 3, 1])[0])
+                predictions.append(np.transpose(out['prediction'].data.cpu().numpy(), [0, 2, 3, 1])[0])
+                depth_gray.append(gray_driving)
+        return sources, drivings, predictions, depth_gray
 
     # endregion
 
-    # region Simswap Functions
-    def initialize_models(self):
-        if not self.opt:
-            torch.nn.Module.dump_patches = True
-            self.opt = FaceDetectionOptions()
-        if not self.face_swap_model:
-            self.face_swap_model = create_model(self.opt)
-            self.face_swap_model.eval()
-        if not self.face_det_model:
-            self.face_det_model = Face_detect_crop(name='antelope')
-            self.face_det_model.prepare(ctx_id=0, det_size=(640, 640), mode='None')
-        if not self.mask_net and self.opt.use_mask:
-            n_classes = 19
-            self.mask_net = BiSeNet(n_classes=n_classes)
-            self.mask_net.cuda()
-            model_path = os.path.join('./simswap/parsing_model/checkpoint', '79999_iter.pth')
-            self.mask_net.load_state_dict(torch.load(model_path))
-            self.mask_net.eval()
-
+    # region Simswap Misc Functions
     def encode_face_in_webcam_image(self):
+        if self.tab_widget_input.currentIndex() == 1:
+            self.recorded_image = cv2.imread(r".\images\input\{:02d}.jpg".format(self.selected_input))
         # Detect face in webcam image and extract features
         with torch.no_grad():
-            source_face_image, _ = self.face_det_model.get(self.recorded_image, self.opt.crop_size)
-            source_face_image = cv2.cvtColor(source_face_image[0], cv2.COLOR_BGR2RGB)
-            source_face_image_pil = Image.fromarray(source_face_image)
-            source_face_image = transformer_Arcface(source_face_image_pil)
+            source_face_image, _, bboxes = self.face_det_model.get(self.recorded_image, self.opt.crop_size)
+            bbox_sizes = [b[2]*b[3] for b in bboxes]
+            max_size_idx = np.argmax(bbox_sizes)
+
+            self.source_face = source_face_image[max_size_idx].copy()
+            source_face_image = cv2.cvtColor(source_face_image[max_size_idx], cv2.COLOR_BGR2RGB)
+            source_face_image = Image.fromarray(source_face_image)
+            source_face_image = transformer_Arcface(source_face_image)
             source_face = source_face_image.view(-1, source_face_image.shape[0],
                                                  source_face_image.shape[1],
                                                  source_face_image.shape[2])
-            self.source_face = source_face.clone().detach().numpy()[0].transpose(1, 2, 0)
-
             # Convert numpy to tensor
             source_face = source_face.cuda()
 
             # Create latent id
-            source_image_downsample = F.interpolate(source_face, size=(112, 112))
+            source_image_downsample = F.interpolate(source_face, size=(112, 112), mode='bicubic')
             latent_source_id = self.face_swap_model.netArc(source_image_downsample)
             self.source_id = F.normalize(latent_source_id, p=2, dim=1)
-
-            # cv2.imshow("SOURCE FACE", cv2.cvtColor(source_image_downsample.cpu().detach().numpy()[0].transpose(1, 2, 0), cv2.COLOR_RGB2BGR))
-            # cv2.waitKey(0)
 
     def encode_target_face(self, target_path):
         # Detect the specific person to be swapped in the provided image
         with torch.no_grad():
             target_face_whole = cv2.imread(target_path)
-            target_face_align_crop, _ = self.face_det_model.get(target_face_whole, self.opt.crop_size)
+            target_face_align_crop, _, _ = self.face_det_model.get(target_face_whole, self.opt.crop_size)
             target_face_align_crop = cv2.cvtColor(target_face_align_crop[0], cv2.COLOR_BGR2RGB)
-            target_face_align_crop_pil = Image.fromarray(target_face_align_crop)
-            target_face = transformer_Arcface(target_face_align_crop_pil)
+            target_face_align_crop = Image.fromarray(target_face_align_crop)
+            target_face = transformer_Arcface(target_face_align_crop)
             target_face = target_face.view(-1, target_face.shape[0], target_face.shape[1], target_face.shape[2])
             self.target_face = target_face.clone().detach().numpy()[0].transpose(1, 2, 0)
 
             target_face = target_face.cuda()
-            target_face_downsample = F.interpolate(target_face, size=(112, 112))
+            target_face_downsample = F.interpolate(target_face, size=(112, 112), mode='bicubic')
 
-            # cv2.imshow("TARGET FACE", cv2.cvtColor(target_face_downsample.cpu().detach().numpy()[0].transpose(1, 2, 0), cv2.COLOR_RGB2BGR))
-            # cv2.waitKey(0)
             self.target_id = self.face_swap_model.netArc(target_face_downsample)
             # self.target_id = F.normalize(self.target_id, p=2, dim=1)
 
@@ -412,22 +790,28 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
 
         id_errors = []
         image_tensor_list = []
+        image_tensor_list_transformed = []
         for face_image in face_image_list:
             face_image_tensor = _to_tensor(cv2.cvtColor(face_image, cv2.COLOR_BGR2RGB))[None, ...].cuda()
-
             face_image_tensor_norm = spNorm(face_image_tensor)
-            face_image_tensor_norm = F.interpolate(face_image_tensor_norm, size=(112, 112))
-            face_id = self.face_swap_model.netArc(face_image_tensor_norm)
+            face_image_tensor_norm_ds = F.interpolate(face_image_tensor_norm, size=(112, 112), mode='bicubic')
+            face_id = self.face_swap_model.netArc(face_image_tensor_norm_ds)
 
             id_errors.append(mse(face_id, self.target_id).detach().cpu().numpy())
             image_tensor_list.append(face_image_tensor)
+            image_tensor_list_transformed.append(face_image_tensor_norm)
 
         id_errors_array = np.array(id_errors)
         min_index = np.argmin(id_errors_array)
         min_value = id_errors_array[min_index]
 
         if min_value < self.opt.id_thres or np.isnan(min_value):
-            swap_result = self.face_swap_model(None, image_tensor_list[min_index], self.source_id, None, True)[0]
+            if self.opt.name == "224":
+                swap_result = self.face_swap_model(None, image_tensor_list[min_index],
+                                                   self.source_id, None, True)[0]
+            else:
+                swap_result = self.face_swap_model(None, image_tensor_list_transformed[min_index],
+                                                   self.source_id, None, True)[0]
 
             final_image = self.reverse_2_whole_image(image_tensor_list[min_index], swap_result,
                                                      image_mat_list[min_index],
@@ -468,7 +852,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
                         face_image_tensor = _to_tensor(cv2.cvtColor(face_image, cv2.COLOR_BGR2RGB))[None, ...].cuda()
 
                         face_image_tensor_norm = spNorm(face_image_tensor)
-                        face_image_tensor_norm = F.interpolate(face_image_tensor_norm, size=(112, 112))
+                        face_image_tensor_norm = F.interpolate(face_image_tensor_norm, size=(112, 112), mode='bicubic')
                         face_id = self.face_swap_model.netArc(face_image_tensor_norm)
 
                         id_errors.append(mse(face_id, self.target_id).detach().cpu().numpy())
@@ -491,9 +875,10 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
                         final_image = frame.astype(np.uint8)
                 else:
                     final_image = frame.astype(np.uint8)
-
+                source_face_rescaled = cv2.resize(self.source_face, (256, 256))
+                final_image[0:256, 0:256] = source_face_rescaled
+                final_image = np.concatenate([frame, final_image], axis=0)
                 cv2.imwrite(os.path.join(temp_results_dir, 'frame_{:07d}.jpg'.format(frame_index)), final_image)
-                print(frame_index)
                 yield frame_index
             else:
                 break
@@ -505,6 +890,10 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         video_clip = ImageSequenceClip(image_filenames, fps=fps)
         video_clip = video_clip.set_audio(video_audio_clip)
         video_clip.write_videofile("./videos/generated/scene.mp4", audio_codec='aac')
+        if self.tab_widget_input.currentIndex() == 1:
+            video_clip.write_videofile("./videos/generated/pregenerated/{:02d}_{:02d}.mp4".format(self.selected_input,
+                                                                                                  self.selected_clip),
+                                       audio_codec='aac')
         # video_audio_clip = AudioFileClip(target_path)
         yield np.nan
 
@@ -546,10 +935,10 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
                                                         target_mask, smooth_mask)
                 target_image = cv2.warpAffine(target_image_parsing, mat_rev, original_size)
             else:
-                target_image = cv2.warpAffine(swapped_image, mat_rev, original_size)[..., ::-1]
+                target_image = cv2.warpAffine(swapped_img, mat_rev, original_size)[..., ::-1]
         else:
             # ToDo: Fix
-            target_image = cv2.warpAffine(swapped_image.astype(np.uint8), mat_rev, original_size)
+            target_image = cv2.warpAffine(swapped_img.astype(np.uint8), mat_rev, original_size)
 
         img_white = cv2.warpAffine(img_white, mat_rev, original_size)
         img_white[img_white > 20] = 255
@@ -588,15 +977,33 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         result = swapped_face * soft_face_mask + target * (1 - soft_face_mask)
         result = result[:, :, ::-1]
         return result
+    # endregion
 
-    """
-    def face_swap_video(self):
-        # Given the source and target person ids, swap faces in the provided video
-        with torch.no_grad():
-            video_swap(opt.video_path, latent_source_id, target_face_id_nonorm, opt.id_thres,
-                       model, app, opt.output_path, temp_results_dir=opt.temp_path, no_simswaplogo=True,
-                       use_mask=opt.use_mask, crop_size=crop_size)
-    """
+
+def find_best_frame(source, driving):
+    import face_alignment
+
+    def normalize_kp(kp):
+        kp = kp - kp.mean(axis=0, keepdims=True)
+        area = ConvexHull(kp[:, :2]).volume
+        area = np.sqrt(area)
+        kp[:, :2] = kp[:, :2] / area
+        return kp
+
+    fa = face_alignment.FaceAlignment(face_alignment.LandmarksType.TWO_D, flip_input=True,
+                                      device='cuda')
+    kp_source = fa.get_landmarks(255 * source)[0]
+    kp_source = normalize_kp(kp_source)
+    norm = float('inf')
+    frame_num = 0
+    for i, image in tqdm(enumerate(driving)):
+        kp_driving = fa.get_landmarks(255 * image)[0]
+        kp_driving = normalize_kp(kp_driving)
+        new_norm = (np.abs(kp_source - kp_driving) ** 2).sum()
+        if new_norm < norm:
+            norm = new_norm
+            frame_num = i
+    return frame_num
 
 
 def encode_segmentation_rgb(segmentation, no_neck=True):
