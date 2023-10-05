@@ -84,9 +84,9 @@ def compute_bbox_trajectories(trajectories, fps, frame_shape, video_path, image_
 
 def process_video(video_path):
     device = 'cuda'
-    fa = face_alignment.FaceAlignment(face_alignment.LandmarksType.TWO_D, flip_input=False, device=device)
+    fa = face_alignment.FaceAlignment(face_alignment.LandmarksType.TWO_D, flip_input=False, device=device,
+                                      face_detector_kwargs={'path_to_detector': "./reenactment/face_detector.pth"})
     video = imageio.get_reader(video_path)
-
     trajectories = []
     previous_frame = None
     fps = video.get_meta_data()['fps']

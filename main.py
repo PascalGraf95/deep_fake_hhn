@@ -164,9 +164,11 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         self.recorded_image = None
         self.loading_animation = QMovie("./loader.gif")
         self.your_face_here = cv2.imread("./images/logos/your_face_here.png", cv2.IMREAD_UNCHANGED)
-        self.your_face_here = cv2.resize(self.your_face_here, (645, 600))
+        self.marker_factor = 0.1
+        self.your_face_here = cv2.resize(self.your_face_here, (0, 0), fx=self.marker_factor, fy=self.marker_factor)
         self.video_fps = 30
         self.deep_fake_video = None
+        self.video_timestamp_list = []
         # self.background_clip = QMovie()
         self.camera = cv2.VideoCapture(0)
         self.record_mode = False
@@ -411,7 +413,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
     def replay_video(self):
         if self.deep_fake_video:
             self.deep_fake_video.set(cv2.CAP_PROP_POS_FRAMES, 0)
-            self.deep_fake_video_timer.start(30)
+            self.deep_fake_video_timer.start(int(1000/self.video_fps))
     # endregion
 
     # region Live Images
@@ -440,9 +442,12 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
             if self.record_mode:
                 if not os.path.isdir(self.recording_path):
                     os.makedirs(self.recording_path)
+                    self.video_timestamp_list.clear()
+
                 img_to_save = cv2.resize(self.recorded_image, (self.recorded_image.shape[1]//2, self.recorded_image.shape[0]//2))
                 data_name = "{:04d}.jpg".format(len(os.listdir(self.recording_path)))
                 cv2.imwrite(os.path.join(self.recording_path, data_name), img_to_save)
+                self.video_timestamp_list.append(time.time()*1000)
 
     def update_fake_video_image(self):
         if not self.deep_fake_video:
@@ -483,11 +488,12 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
 
     def stop_recording(self):
         self.record_mode = False
-        self.generate_face_reenactment(video_recorded=True)
         self.stop_recording_timer.stop()
+        self.video_fps = 1000 / np.mean([stamp - self.video_timestamp_list[i-1] for i, stamp in enumerate(self.video_timestamp_list) if i > 0])
+        self.generate_face_reenactment(video_recorded=True)
 
         self.your_face_here = cv2.imread("./images/logos/your_face_here.png", cv2.IMREAD_UNCHANGED)
-        self.your_face_here = cv2.resize(self.your_face_here, (645, 600))
+        self.your_face_here = cv2.resize(self.your_face_here, (0, 0), fx=self.marker_factor, fy=self.marker_factor)
     # endregion
 
     # region Generation Functions
@@ -529,6 +535,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
                                                                                          self.selected_clip)):
                 self.deep_fake_video = cv2.VideoCapture(r"./videos/generated/pregenerated/{:02d}_{:02d}.mp4".format(self.selected_input,
                                                                                          self.selected_clip))
+                self.video_fps = 30
             elif not self.check_box_video.isChecked():
                 return
             else:
@@ -560,7 +567,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
                 self.record_mode = True
                 self.stop_recording_timer.start(6000)
                 self.your_face_here = cv2.imread("./images/logos/your_face_here_recording.png", cv2.IMREAD_UNCHANGED)
-                self.your_face_here = cv2.resize(self.your_face_here, (645, 600))
+                self.your_face_here = cv2.resize(self.your_face_here, (0, 0), fx=self.marker_factor, fy=self.marker_factor)
 
                 return
 
@@ -573,9 +580,10 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
             files = [os.path.join(self.recording_path, f) for f in files]
             images = [cv2.cvtColor(cv2.imread(f), cv2.COLOR_BGR2RGB) for f in files]
 
-            imageio.mimsave("target.mp4", [img_as_ubyte(i) for i in images], fps=12)
+            imageio.mimsave("target.mp4", [img_as_ubyte(i) for i in images], fps=int(self.video_fps))
             commands = process_video("target.mp4")
             self.progress_bar.setValue(25)
+            print(commands[0])
             subprocess.run(shlex.split(commands[0]))
             self.progress_bar.setValue(50)
 
@@ -593,7 +601,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
             self.tool_box.repaint()
 
             self.deep_fake_video = cv2.VideoCapture(r".\videos\generated\reenactment.mp4")
-            self.deep_fake_video_timer.start(30)
+            self.deep_fake_video_timer.start(int(1000/self.video_fps))
         elif self.tool_box.currentIndex() == 1:
             self.tool_box.setCurrentIndex(0)
     # endregion

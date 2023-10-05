@@ -68,7 +68,6 @@ class fsModel(BaseModel):
 
         if not self.is_train:
             pretrained_path = '' if not self.is_train else opt.load_pretrain
-            print("PRETRAINED PATH:", pretrained_path)
             self.load_network(self.netG, 'G', opt.which_epoch, pretrained_path)
             return
 
