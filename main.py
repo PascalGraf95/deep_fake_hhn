@@ -38,6 +38,7 @@ import yaml
 from reenactment.sync_batchnorm import DataParallelWithCallback
 from reenactment.animate import normalize_kp
 from crop_video import process_video
+import face_alignment
 import subprocess
 import shlex
 
@@ -153,6 +154,9 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         # Reenactment Objects
         self.depth_encoder = None
         self.depth_decoder = None
+        self.generator = None
+        self.kp_detector = None
+        self.fa = None
         # Encoded Faces & Images
         self.source_face = None
         self.source_id = None
@@ -252,13 +256,9 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         # endregion
 
         # ToDo: Fix Video Audio
-        # ToDo: Other Inception Video
-        # ToDo: Better Reenactment Images
         # ToDo: Img Size Output
         # ToDo: GIVE AWAY?!
-        # ToDo: Other Trump Video
         # ToDo: Poster
-        # ToDo: Progress-Bar for Reenactment
 
     # region Initialization
     def initialize_models(self):
@@ -284,6 +284,12 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
             self.depth_decoder = depth.DepthDecoder(num_ch_enc=self.depth_encoder.num_ch_enc, scales=range(4))
             loaded_dict_enc = torch.load('reenactment/depth/models/depth_face_model/encoder.pth')
             loaded_dict_dec = torch.load('reenactment/depth/models/depth_face_model/depth.pth')
+            self.generator, self.kp_detector = self.load_checkpoints(config_path="reenactment/config/vox-adv-256.yaml",
+                                                                     checkpoint_path="reenactment/models/DaGAN_vox_adv_256.pth.tar",
+                                                                     cpu=False)
+            self.fa = face_alignment.FaceAlignment(face_alignment.LandmarksType.TWO_D, flip_input=True,
+                                                   device='cuda')
+
             filtered_dict_enc = {k: v for k, v in loaded_dict_enc.items() if k in self.depth_encoder.state_dict()}
             self.depth_encoder.load_state_dict(filtered_dict_enc)
             self.depth_decoder.load_state_dict(loaded_dict_dec)
@@ -554,7 +560,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
 
                 # 6. Show Results
                 self.deep_fake_video = cv2.VideoCapture(r".\videos\generated\scene.mp4")
-            self.deep_fake_video_timer.start(self.video_freq)
+            self.deep_fake_video_timer.start(30)
             self.progress_bar.setValue(0)
 
         elif self.tool_box.currentIndex() == 1:
@@ -602,7 +608,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
             self.tool_box.repaint()
 
             self.deep_fake_video = cv2.VideoCapture(r".\videos\generated\reenactment.mp4")
-            self.deep_fake_video_timer.start(self.video_freq)
+            self.deep_fake_video_timer.start(30)
         elif self.tool_box.currentIndex() == 1:
             self.tool_box.setCurrentIndex(0)
     # endregion
@@ -622,26 +628,25 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
 
         source_image = resize(source_image, (256, 256))[..., :3]
         driving_video = [resize(frame, (256, 256))[..., :3] for frame in driving_video]
-        generator, kp_detector = self.load_checkpoints(config_path="reenactment/config/vox-adv-256.yaml",
-                                                       checkpoint_path="reenactment/models/DaGAN_vox_adv_256.pth.tar",
-                                                       cpu=False)
+
         if find_best:
-            i = find_best_frame(source_image, driving_video)
+            i = self.find_best_frame(source_image, driving_video)
+            self.progress_bar.setValue(75)
             driving_forward = driving_video[i:]
             driving_backward = driving_video[:(i + 1)][::-1]
             sources_forward, drivings_forward, predictions_forward, depth_forward = \
                 self.make_animation(source_image,
                                     driving_forward,
-                                    generator,
-                                    kp_detector,
+                                    self.generator,
+                                    self.kp_detector,
                                     relative=relative,
                                     adapt_movement_scale=adapt_scale,
                                     cpu=False)
             sources_backward, drivings_backward, predictions_backward, depth_backward = \
                 self.make_animation(source_image,
                                     driving_backward,
-                                    generator,
-                                    kp_detector,
+                                    self.generator,
+                                    self.kp_detector,
                                     relative=relative,
                                     adapt_movement_scale=adapt_scale,
                                     cpu=False)
@@ -650,8 +655,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
             drivings = drivings_backward[::-1] + drivings_forward[1:]
             depth_gray = depth_backward[::-1] + depth_forward[1:]
         else:
-            sources, drivings, predictions, depth_gray = self.make_animation(source_image, driving_video, generator,
-                                                                             kp_detector, relative=relative,
+            sources, drivings, predictions, depth_gray = self.make_animation(source_image, driving_video, self.generator,
+                                                                             self.kp_detector, relative=relative,
                                                                              adapt_movement_scale=adapt_scale,
                                                                              cpu=False)
         final_images = []
@@ -742,6 +747,27 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
                 predictions.append(np.transpose(out['prediction'].data.cpu().numpy(), [0, 2, 3, 1])[0])
                 depth_gray.append(gray_driving)
         return sources, drivings, predictions, depth_gray
+
+    def find_best_frame(self, source, driving):
+        def normalize_kp(kp):
+            kp = kp - kp.mean(axis=0, keepdims=True)
+            area = ConvexHull(kp[:, :2]).volume
+            area = np.sqrt(area)
+            kp[:, :2] = kp[:, :2] / area
+            return kp
+
+        kp_source = self.fa.get_landmarks(255 * source)[0]
+        kp_source = normalize_kp(kp_source)
+        norm = float('inf')
+        frame_num = 0
+        for i, image in tqdm(enumerate(driving)):
+            kp_driving = self.fa.get_landmarks(255 * image)[0]
+            kp_driving = normalize_kp(kp_driving)
+            new_norm = (np.abs(kp_source - kp_driving) ** 2).sum()
+            if new_norm < norm:
+                norm = new_norm
+                frame_num = i
+        return frame_num
 
     # endregion
 
@@ -987,31 +1013,6 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         return result
     # endregion
 
-
-def find_best_frame(source, driving):
-    import face_alignment
-
-    def normalize_kp(kp):
-        kp = kp - kp.mean(axis=0, keepdims=True)
-        area = ConvexHull(kp[:, :2]).volume
-        area = np.sqrt(area)
-        kp[:, :2] = kp[:, :2] / area
-        return kp
-
-    fa = face_alignment.FaceAlignment(face_alignment.LandmarksType.TWO_D, flip_input=True,
-                                      device='cuda')
-    kp_source = fa.get_landmarks(255 * source)[0]
-    kp_source = normalize_kp(kp_source)
-    norm = float('inf')
-    frame_num = 0
-    for i, image in tqdm(enumerate(driving)):
-        kp_driving = fa.get_landmarks(255 * image)[0]
-        kp_driving = normalize_kp(kp_driving)
-        new_norm = (np.abs(kp_source - kp_driving) ** 2).sum()
-        if new_norm < norm:
-            norm = new_norm
-            frame_num = i
-    return frame_num
 
 
 def encode_segmentation_rgb(segmentation, no_neck=True):
