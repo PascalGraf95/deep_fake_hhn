@@ -42,7 +42,6 @@ import face_alignment
 import subprocess
 import shlex
 
-
 mse = torch.nn.MSELoss().cuda()
 spNorm = SpecificNorm()
 
@@ -50,6 +49,7 @@ transformer_Arcface = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
+
 
 def _to_tensor(array):
     tensor = torch.from_numpy(array)
@@ -140,7 +140,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
 
         # region - Bug Fix -
         self.tool_box.setCurrentIndex(1)
-        time.sleep(0.1)
+        time.sleep(1)
         self.tool_box.setCurrentIndex(0)
         # endregion
 
@@ -177,6 +177,9 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         self.camera = cv2.VideoCapture(0)
         self.record_mode = False
         self.recording_path = "temp_recording"
+        self.scene_image_scaling = 0.73
+        self.input_image_scaling = 0.55
+        self.output_image_scaling = 0.9
         # endregion
 
         # region Model Initialization
@@ -187,13 +190,12 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         header = QPixmap("./images/logos/Header.png").scaledToWidth(self.label_title.width())
         self.label_title.setPixmap(header)
 
-        self.image_scaling = 0.7
         for idx, preview_image in enumerate([self.image_preview_1, self.image_preview_2, self.image_preview_3,
                                              self.image_preview_4, self.image_preview_5, self.image_preview_6,
                                              self.image_preview_7, self.image_preview_8, self.image_preview_9]):
             preview_image.setMargin(5)
             preview_image_pixmap = QPixmap("./images/preview/{:02d}.jpg".format(idx+1)).scaledToHeight(
-                int(self.image_preview_1.height()*self.image_scaling))
+                int(self.image_preview_1.height()*self.scene_image_scaling))
             preview_image.setPixmap(preview_image_pixmap)
 
         for idx, input_image in enumerate([self.image_input_1, self.image_input_2, self.image_input_3,
@@ -201,7 +203,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
                                              self.image_input_7, self.image_input_8, self.image_input_9]):
             input_image.setMargin(5)
             input_image_pixmap = QPixmap("./images/input/{:02d}.jpg".format(idx+1)).scaledToHeight(
-                int(self.image_preview_1.height()*self.image_scaling))
+                int(self.image_preview_1.height()*self.input_image_scaling))
             input_image.setPixmap(input_image_pixmap)
         # endregion
         # endregion
@@ -257,8 +259,10 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
 
         # ToDo: Fix Video Audio
         # ToDo: Img Size Output
-        # ToDo: GIVE AWAY?!
+        # ToDo: INPUT FACES NAMES
+        # ToDo: Print Shit
         # ToDo: Poster
+        # ToDo: Bilder Merkel beschneiden
 
     # region Initialization
     def initialize_models(self):
@@ -478,13 +482,13 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         # Original Images
         for i, label in enumerate([self.label_original_1, self.label_original_2]):
             image_path = r".\images\scenes\{:02d}\{:02d}.jpg".format(self.selected_clip, i+1)
-            original_image = QPixmap(image_path).scaledToHeight(image_size)
+            original_image = QPixmap(image_path).scaledToHeight(image_size*self.output_image_scaling)
             label.setPixmap(original_image)
 
         # Generated Images
         for i, label in enumerate([self.label_deep_fake_1, self.label_deep_fake_2]):
             image_path = r".\images\generated\{:02d}.jpg".format(i+1)
-            original_image = QPixmap(image_path).scaledToHeight(image_size)
+            original_image = QPixmap(image_path).scaledToHeight(image_size*self.output_image_scaling)
             label.setPixmap(original_image)
 
     def clear_output_images(self):
@@ -518,9 +522,9 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
             for i, value in enumerate([75, 100]):
                 final_image = self.face_swap_image(
                     r".\images\scenes\{:02d}\{:02d}.jpg".format(self.selected_clip, i + 1))
-                final_image = cv2.resize(final_image, (512, 512))
-                source_face_rescaled = cv2.resize(self.source_face, (128, 128))
-                final_image[0:128, 0:128] = source_face_rescaled
+                final_image = cv2.resize(final_image, (1024, 1024))
+                source_face_rescaled = cv2.resize(self.source_face, (256, 256))
+                final_image[0:256, 0:256] = source_face_rescaled
                 cv2.imwrite(r".\images\generated\{:02d}.jpg".format(i + 1), final_image)
                 self.progress_bar.setValue(value)
 
@@ -537,9 +541,10 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
             if not os.path.isfile(r".\videos\scenes\{:02d}\scene.mp4".format(self.selected_clip)):
                 return
 
-            # 1.5 If in Input Image mode, check if the video has been generated already
+            # 5.5 If in Input Image mode, check if the video has been generated already
             if os.path.isfile("./videos/generated/pregenerated/{:02d}_{:02d}.mp4".format(self.selected_input,
-                                                                                         self.selected_clip)):
+                                                                                         self.selected_clip)) \
+                    and self.tab_widget_input.currentIndex() == 1:
                 self.deep_fake_video = cv2.VideoCapture(r"./videos/generated/pregenerated/{:02d}_{:02d}.mp4".format(self.selected_input,
                                                                                          self.selected_clip))
                 self.video_freq = 30
