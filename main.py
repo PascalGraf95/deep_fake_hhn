@@ -258,11 +258,11 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         # endregion
 
         # ToDo: Fix Video Audio
-        # ToDo: Img Size Output
         # ToDo: INPUT FACES NAMES
         # ToDo: Print Shit
         # ToDo: Poster
-        # ToDo: Bilder Merkel beschneiden
+        # ToDo: Andere Inputs?
+        # ToDo: Reenactment Center of image!
 
     # region Initialization
     def initialize_models(self):
@@ -508,6 +508,37 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
     # endregion
 
     # region Generation Functions
+    def generate_print_image(self):
+        empty_image = np.ones((int(1240*1.2), int(1754*1.2), 3)) * 255
+        generated_1 = cv2.resize(cv2.imread(r".\images\generated\01.jpg"), (512, 512))
+        original_1 = cv2.resize(cv2.imread(r".\images\scenes\{:02d}\01.jpg".format(self.selected_clip)), (512, 512))
+
+        generated_2 = cv2.resize(cv2.imread(r".\images\generated\02.jpg"), (512, 512))
+        original_2 = cv2.resize(cv2.imread(r".\images\scenes\{:02d}\02.jpg".format(self.selected_clip)), (512, 512))
+
+        header = cv2.imread(r".\images\logos\Header2.png")
+        header_shape = header.shape
+        header = cv2.resize(header, (int(1754*1.2), int(1754*1.2/header.shape[1]*header_shape[0])))
+        print(header.shape)
+
+        offset_x = 500
+        offset_y = 250
+        ims = 512
+        dist = 30
+
+        # cv2.putText(empty_image, "HHN Face Wizard", (400, 120), cv2.FONT_HERSHEY_TRIPLEX, 3, (0,0,0), 4, cv2.LINE_AA)
+        # cv2.putText(empty_image, "Deep Fake Generator", (450, 200), cv2.FONT_HERSHEY_TRIPLEX, 2, (0,0,0), 4, cv2.LINE_AA)
+
+        empty_image[0:header.shape[1], :] = header
+
+        empty_image[0+offset_y:ims+offset_y, 0+offset_x:ims+offset_x] = original_1
+        empty_image[ims+offset_y+dist:ims*2+offset_y+dist, 0+offset_x:ims+offset_x] = original_2
+
+        empty_image[0+offset_y:ims+offset_y, ims+offset_x+dist:ims*2+offset_x+dist] = generated_1
+        empty_image[ims+offset_y+dist:ims*2+offset_y+dist, ims+offset_x+dist:ims*2+offset_x+dist] = generated_2
+
+        cv2.imwrite(r".\images\print_output.png", empty_image)
+
     def generate_simswap(self):
         if self.tool_box.currentIndex() == 0:
             # 1. Deactivate tool box while operating
@@ -527,6 +558,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
                 final_image[0:256, 0:256] = source_face_rescaled
                 cv2.imwrite(r".\images\generated\{:02d}.jpg".format(i + 1), final_image)
                 self.progress_bar.setValue(value)
+            self.generate_print_image()
 
             # 4. Switch to Output UI & show image results
             self.tool_box.setEnabled(True)
