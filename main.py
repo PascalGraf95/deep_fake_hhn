@@ -1,6 +1,7 @@
 import glob
 import sys
 from PyQt6 import QtWidgets
+from PyQt6 import QtCore
 from PyQt6.QtGui import QImage, QPixmap, QPalette, QColor, QWindow, QMovie, QFont, QIcon
 from PyQt6.QtMultimedia import QSoundEffect
 from PyQt6.QtCore import QTimer, Qt
@@ -115,10 +116,14 @@ class FaceDetectionOptions:
 
 
 """
-python test_video_swapspecific.py --crop_size 224 --use_mask --pic_specific_path ./demo_file/titanic.png --name people --Arc_path arcface_model/arcface_checkpoint.tar --pic_a_path ./demo_file/titanic.jpg --video_path ./demo_file/titanic_short.mp4  --output_path ./output/titanic.mp4 --temp_path ./temp_results --no_simswaplogo
+python test_video_swapspecific.py --crop_size 224 --use_mask --pic_specific_path ./demo_file/titanic.png --name people 
+--Arc_path arcface_model/arcface_checkpoint.tar --pic_a_path ./demo_file/titanic.jpg 
+--video_path ./demo_file/titanic_short.mp4  --output_path ./output/titanic.mp4 --temp_path ./temp_results 
+--no_simswaplogo
 
-
-python test_wholeimage_swapspecific.py --name people --pic_specific_path demo_file/khaleesi.jpg --crop_size 224 --Arc_path arcface_model/arcface_checkpoint.tar --pic_a_path demo_file/ich.jpg --pic_b_path demo_file/khaleesi.jpg --output_path output/ 
+python test_wholeimage_swapspecific.py --name people --pic_specific_path demo_file/khaleesi.jpg --crop_size 224 
+--Arc_path arcface_model/arcface_checkpoint.tar --pic_a_path demo_file/ich.jpg 
+--pic_b_path demo_file/khaleesi.jpg --output_path output/ 
 """
 selected_style_sheet = "background-repeat: no-repeat;"\
                        "background-position: center;"\
@@ -130,6 +135,98 @@ selected_style_sheet = "background-repeat: no-repeat;"\
                        "padding-top: 0px; padding-bottom: 0px;"
 
 default_style_sheet = ""
+
+input_image_citation = [
+    "",
+    "Antonio Zugaldia from Brussels, Belgium (https://commons.wikimedia.org/wiki/File:Mr._Bean_2011.jpg), „Mr. Bean 2011“, https://creativecommons.org/licenses/by/2.0/legalcode",
+    "FameFlynet (https://commons.wikimedia.org/wiki/File:Natalie_Dormer_2014.jpg), https://creativecommons.org/licenses/by-sa/4.0/legalcode",
+    "Gerald Geronimo (https://commons.wikimedia.org/wiki/File:Nicolas_Cage_2011_CC.jpg), „Nicolas Cage 2011 CC“, https://creativecommons.org/licenses/by-sa/2.0/legalcode",
+    "Joella Marano at https://www.flickr.com/photos/ellasportfolio/ derivative work: Bff (talk) (https://commons.wikimedia.org/wiki/File:EmmaWatsonNov2010-2.jpg), „EmmaWatsonNov2010-2“, https://creativecommons.org/licenses/by/2.0/legalcode",
+    "",
+    "Fashion photographer Anthony Citrano at http://www.zigzaglens.com/ (https://commons.wikimedia.org/wiki/File:Anne_Hathaway_2008.jpg), „Anne Hathaway 2008“, https://creativecommons.org/licenses/by/2.0/legalcode",
+    "Gage Skidmore from Peoria, AZ, United States of America (https://commons.wikimedia.org/wiki/File:Patrick_Stewart_(48445083306).jpg), „Patrick Stewart (48445083306)“, https://creativecommons.org/licenses/by-sa/2.0/legalcode",
+    "内閣官房内閣広報室 (https://commons.wikimedia.org/wiki/File:Shinzō_Abe_and_Malala_Yousafzai_(1)_(cropped).jpg), https://creativecommons.org/licenses/by/4.0/legalcode"
+]
+
+input_image_labels = [
+    "Nicolaj C. Stache",
+    "Rowan Atkinson",
+    "Natalie Dormer",
+    "Nicholas Cage",
+    "Emma Watson",
+    "Barack Obama",
+    "Anne Hathaway",
+    "Patrick Stewart",
+    "Malala Yousafzai"
+]
+
+preview_image_citation = [
+    "Laviru Koruwakankanamge (https://commons.wikimedia.org/wiki/File:Millie_Bobby_Brown_-_MBB_-_Portrait_1_-_SFM5_-_July_10,_2022_at_Stranger_Fan_Meet_5_People_Convention.jpg), https://creativecommons.org/licenses/by-sa/4.0/legalcode",
+    "Georges Biard (https://commons.wikimedia.org/wiki/File:Orlando_Bloom_Cannes_2013.jpg), „Orlando Bloom Cannes 2013“, https://creativecommons.org/licenses/by-sa/3.0/legalcode",
+    "Heinrich-Böll-Stiftung from Berlin, Deutschland (https://commons.wikimedia.org/wiki/File:Robert_Habeck_(46687148461).jpg), „Robert Habeck (46687148461)“, https://creativecommons.org/licenses/by-sa/2.0/legalcode",
+    "© Raimond Spekking / CC BY-SA 4.0 (via Wikimedia Commons) (https://commons.wikimedia.org/wiki/File:Ranga_Yogeshwar_-_Maischberger_-_2017_(cropped).jpg), https://creativecommons.org/licenses/by-sa/4.0/legalcode",
+    "European Parliament (https://commons.wikimedia.org/wiki/File:Greta_Thunberg,_March_2020_(cropped).jpg), „Greta Thunberg, March 2020 (cropped)“, https://creativecommons.org/licenses/by/2.0/legalcode",
+    "Arno Mikkor, EU2017EE Estonian Presidency (https://commons.wikimedia.org/wiki/File:Emmanuel_Macron_(cropped).jpg), „Emmanuel Macron (cropped)“, https://creativecommons.org/licenses/by/2.0/legalcode",
+    "",
+    "© Raimond Spekking / CC BY-SA 4.0 (via Wikimedia Commons) (https://commons.wikimedia.org/wiki/File:Angela_Merkel_2019_cropped.jpg), https://creativecommons.org/licenses/by-sa/4.0/legalcode",
+    "Steve Krysak (https://commons.wikimedia.org/wiki/File:Miranda_Cosgrove_2.jpg), „Miranda Cosgrove 2“, https://creativecommons.org/licenses/by-sa/2.0/legalcode"
+]
+
+preview_image_labels = [
+    "Millie Bobby Brown",
+    "Orlando Bloom",
+    "Robert Habeck",
+    "Ranga Yogeshwar",
+    "Greta Thunberg",
+    "Emmanuel Macron",
+    "Donald Trump",
+    "Angela Merkel",
+    "Miranda Cosgrove"
+]
+
+original_image_citation = [
+    ["Gage Skidmore from Peoria, AZ, United States of America (https://commons.wikimedia.org/wiki/File:Millie_Bobby_Brown_(41915336280).jpg), „Millie Bobby Brown (41915336280)“, Deep Fake von HHN, https://creativecommons.org/licenses/by-sa/2.0/legalcode",
+     "Gage Skidmore from Peoria, AZ, United States of America (https://commons.wikimedia.org/wiki/File:Millie_Bobby_Brown_(35820638120).jpg), „Millie Bobby Brown (35820638120)“, Deep Fake von HHN, https://creativecommons.org/licenses/by-sa/2.0/legalcode"],
+    ["Gage Skidmore (https://commons.wikimedia.org/wiki/File:Cate_Blanchett_&_Orlando_Bloom_2014_Comic_Con.jpg), „Cate Blanchett & Orlando Bloom 2014 Comic Con“, Deep Fake von HHN, https://creativecommons.org/licenses/by-sa/2.0/legalcode",
+     "UNICEF Ukraine ©UNICEF/UN017897/Georgiev (https://commons.wikimedia.org/wiki/File:UNICEF_Goodwill_Ambassador_Orlando_Bloom_3.jpg), „UNICEF Goodwill Ambassador Orlando Bloom 3“, Deep Fake von HHN, https://creativecommons.org/licenses/by/2.0/legalcode"],
+    ["Heinrich-Böll-Stiftung from Berlin, Deutschland (https://commons.wikimedia.org/wiki/File:Robert_Habeck,_Durs_Grünbein,_Ellen_Ueberschär_(45001770952).jpg), „Robert Habeck, Durs Grünbein, Ellen Ueberschär (45001770952)“, Deep Fake von HHN, https://creativecommons.org/licenses/by-sa/2.0/legalcode",
+     "BÜNDNIS 90/DIE GRÜNEN Sachsen (https://commons.wikimedia.org/wiki/File:Robert_Habeck_Sachsen_August_2017.jpg), „Robert Habeck Sachsen August 2017“, Deep Fake von HHN, https://creativecommons.org/licenses/by-sa/2.0/legalcode"],
+    ["KarinZacharias (https://commons.wikimedia.org/wiki/File:0xD66BB2264CB749289BB1055006DDD183_ap-s-international-gmbh_1.jpg), Deep Fake von HHN, https://creativecommons.org/licenses/by-sa/4.0/legalcode",
+     "© Raimond Spekking / CC BY-SA 4.0 (via Wikimedia Commons) (https://commons.wikimedia.org/wiki/File:Hart_aber_fair_-_2023-02-06-6572.jpg), Deep Fake von HHN, https://creativecommons.org/licenses/by-sa/4.0/legalcode"],
+    ["Stefan Müller (climate stuff, 1 Mio views) (https://commons.wikimedia.org/wiki/File:Greta_Thunberg_spricht_beim_Klimastreik_vor_dem_Reichstag_-_51511238532.jpg), „Greta Thunberg spricht beim Klimastreik vor dem Reichstag - 51511238532“, Deep Fake von HHN, https://creativecommons.org/licenses/by/2.0/legalcode",
+     "Streetsblog Denver from Denver, USA (https://commons.wikimedia.org/wiki/File:Greta_Thunberg_(48882848248).jpg), „Greta Thunberg (48882848248)“, Deep Fake von HHN, https://creativecommons.org/licenses/by/2.0/legalcode"],
+    ["The Kremlin, Moscow (https://commons.wikimedia.org/wiki/File:Angela_Merkel,_Emmanuel_Macron_&_Brigitte_Macron.jpg), Deep Fake von HHN, https://creativecommons.org/licenses/by/4.0/legalcode",
+     "Casa Rosada (Argentina Presidency of the Nation) (https://commons.wikimedia.org/wiki/File:Alberto_Fernández_&_Emmanuel_Macron_G20_2021_meeting.jpg), „Alberto Fernández & Emmanuel Macron G20 2021 meeting“, Deep Fake von HHN, https://creativecommons.org/licenses/by/2.5/ar/deed.en"],
+    ["", "Gage Skidmore from Peoria, AZ, United States of America (https://commons.wikimedia.org/wiki/File:Donald_Trump_(8567813820)_(2).jpg), „Donald Trump (8567813820) (2)“, Deep Fake von HHN, https://creativecommons.org/licenses/by-sa/2.0/legalcode"],
+    ["Indeedous (https://commons.wikimedia.org /wiki/File:Angela_Merkel_Apolda_2014_003.jpg), “Angela Merkel Apolda 2014”, Wikimedia Commons",
+     "Publicon (https://commons.wikimedia.org/wiki/File:Dieter_Kempf,_Angela_Merkel_und_Joachim_Lang_beim_Tag_der_Deutschen_Industrie_2017.jpg), Deep Fake von HHN, https://creativecommons.org/licenses/by-sa/4.0/legalcode"],
+    ["Steve Krysak (https://commons.wikimedia.org/wiki/File:Miranda_Cosgrove_2.jpg), „Miranda Cosgrove 2“, Deep Fake von HHN, https://creativecommons.org/licenses/by-sa/2.0/legalcode",
+     "https://www.flickr.com/photos/dephisticate/ (https://commons.wikimedia.org/wiki/File:Miranda_Cosgrove_2011_Feb_06.jpg), „Miranda Cosgrove 2011 Feb 06“, Deep Fake von HHN, https://creativecommons.org/licenses/by-sa/2.0/legalcode"]
+]
+
+video_citation = [
+    "TheOfficialPandora (https://www.youtube.com/watch?v=s_qu53JGOO0), „Pandora x Millie Bobby Brown: Make Mother’s Day special with Pandora jewellery“, https://creativecommons.org/licenses/by/2.0/legalcode"
+    "ONU Brasil (https://www.youtube.com/watch?v=AUcNl1RFmuo), „Embaixador do UNICEF, Orlando Bloom visita Moçambique“, https://creativecommons.org/licenses/by/2.0/legalcode",
+    "Heinrich-Böll-Stiftung (https://www.youtube.com/watch?v=gZOxPMoBFtg&t=1086s), „Gesellschaftsprojekt Energiewende - Eröffnungsimpuls Robert Habeck“, https://creativecommons.org/licenses/by/2.0/legalcode",
+    "Start coding! (https://www.youtube.com/watch?v=kHGAnK-vn_g), „Ranga Yogeshwar – Start Coding!“, https://creativecommons.org/licenses/by/2.0/legalcode",
+    "GreensEFA (https://www.youtube.com/watch?v=DieafD94VdM&t=15s), „Greta Thunberg in the European Parliament - I want you to panic!“, https://creativecommons.org/licenses/by/2.0/legalcode",
+    "European Central Bank (https://www.youtube.com/watch?v=HhljUdMUbs0&t=64s), „Speech by Emmanuel Macron, President of France (FR)“, https://creativecommons.org/licenses/by/2.0/legalcode",
+    "VOA Learning English (https://www.youtube.com/watch?v=mVgr2Qhc070), „Convention Speeches of Donald Trump and Hillary Clinton“, https://creativecommons.org/licenses/by/2.0/legalcode",
+    "Fulbright Association (https://www.youtube.com/watch?v=z55t7FTcWEk), „Chancellor Angela Merkel’s Speech“, https://creativecommons.org/licenses/by/2.0/legalcode",
+    "NickRewind (https://www.youtube.com/watch?v=275p_K6X2Gg&t=70s), „Emma Stone Guest Stars on iCarly! 🎉 | iFind Spencer Friends in 5 Minutes | NickRewind“, https://creativecommons.org/licenses/by/2.0/legalcode",
+]
+
+reenactment_citation = [
+    "Gage Skidmore from Peoria, AZ, United States of America (https://commons.wikimedia.org/wiki/File:Millie_Bobby_Brown_(43724155691)_(cropped).jpg), „Millie Bobby Brown (43724155691) (cropped)“, Deep Fake von HHN, https://creativecommons.org/licenses/by-sa/2.0/legalcode",
+    "Georges Biard (https://commons.wikimedia.org/wiki/File:Orlando_Bloom_Cannes_2013.jpg), „Orlando Bloom Cannes 2013“, https://creativecommons.org/licenses/by-sa/3.0/legalcode",
+    "Heinrich-Böll-Stiftung from Berlin, Deutschland (https://commons.wikimedia.org/wiki/File:Robert_Habeck_(43133722790).jpg), „Robert Habeck (43133722790)“, Deep Fake von HHN, https://creativecommons.org/licenses/by-sa/2.0/legalcode",
+    "© Raimond Spekking / CC BY-SA 4.0 (via Wikimedia Commons) (https://commons.wikimedia.org/wiki/File:Ranga_Yogeshwar_-_Maischberger_-_2017_(cropped).jpg), https://creativecommons.org/licenses/by-sa/4.0/legalcode",
+    "Anders Hellberg (https://commons.wikimedia.org/wiki/File:Greta_Thunberg_02.jpg), Deep Fake von HHN, https://creativecommons.org/licenses/by-sa/4.0/legalcode",
+    "Arno Mikkor, EU2017EE Estonian Presidency (https://commons.wikimedia.org/wiki/File:Emmanuel_Macron_(cropped).jpg), „Emmanuel Macron (cropped)“, https://creativecommons.org/licenses/by/2.0/legalcode",
+    "",
+    "© Raimond Spekking / CC BY-SA 4.0 (via Wikimedia Commons) (https://commons.wikimedia.org/wiki/File:Angela_Merkel_2019_cropped.jpg), https://creativecommons.org/licenses/by-sa/4.0/legalcode",
+    "NickRewind (https://commons.wikimedia.org/wiki/File:Miranda_Cosgrove_NickRewind_2022.jpg), „Miranda Cosgrove NickRewind 2022“, Deep Fake von HHN, https://creativecommons.org/licenses/by/3.0/legalcode"
+]
 
 
 class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
@@ -187,7 +284,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         # endregion
 
         # region Initial Label States
-        header = QPixmap("./images/logos/Header.png").scaledToWidth(self.label_title.width())
+        header = QPixmap("./images/logos/Header.png").scaledToWidth(self.label_title.width(),
+                                                                mode=QtCore.Qt.TransformationMode.SmoothTransformation)
         self.label_title.setPixmap(header)
 
         for idx, preview_image in enumerate([self.image_preview_1, self.image_preview_2, self.image_preview_3,
@@ -195,16 +293,30 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
                                              self.image_preview_7, self.image_preview_8, self.image_preview_9]):
             preview_image.setMargin(5)
             preview_image_pixmap = QPixmap("./images/preview/{:02d}.jpg".format(idx+1)).scaledToHeight(
-                int(self.image_preview_1.height()*self.scene_image_scaling))
+                int(self.image_preview_1.height()*self.scene_image_scaling),
+                mode=QtCore.Qt.TransformationMode.SmoothTransformation)
             preview_image.setPixmap(preview_image_pixmap)
+            preview_image.setToolTip(preview_image_citation[idx])
 
         for idx, input_image in enumerate([self.image_input_1, self.image_input_2, self.image_input_3,
                                              self.image_input_4, self.image_input_5, self.image_input_6,
                                              self.image_input_7, self.image_input_8, self.image_input_9]):
             input_image.setMargin(5)
             input_image_pixmap = QPixmap("./images/input/{:02d}.jpg".format(idx+1)).scaledToHeight(
-                int(self.image_preview_1.height()*self.input_image_scaling))
+                int(self.image_preview_1.height()*self.input_image_scaling),
+                mode=QtCore.Qt.TransformationMode.SmoothTransformation)
             input_image.setPixmap(input_image_pixmap)
+            input_image.setToolTip(input_image_citation[idx])
+
+        for idx, input_text in enumerate([self.input_label_1, self.input_label_2, self.input_label_3,
+                                          self.input_label_4, self.input_label_5, self.input_label_6,
+                                          self.input_label_7, self.input_label_8, self.input_label_9]):
+            input_text.setText(input_image_labels[idx])
+
+        for idx, input_text in enumerate([self.label_title_1, self.label_title_2, self.label_title_3,
+                                          self.label_title_4, self.label_title_5, self.label_title_6,
+                                          self.label_title_7, self.label_title_8, self.label_title_9]):
+            input_text.setText(preview_image_labels[idx])
         # endregion
         # endregion
 
@@ -237,7 +349,6 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         self.button_generate.clicked.connect(self.generate)
         self.tool_box.currentChanged.connect(self.change_tool_box)
         self.tab_widget_input.currentChanged.connect(self.change_tabs)
-        self.combo_box_model.currentIndexChanged.connect(self.change_combo_model)
         self.push_button_play.clicked.connect(self.replay_video)
         # endregion
         # endregion
@@ -260,9 +371,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         # ToDo: Fix Video Audio
         # ToDo: INPUT FACES NAMES
         # ToDo: Print Shit
-        # ToDo: Poster
-        # ToDo: Andere Inputs?
-        # ToDo: Reenactment Center of image!
+        # ToDo: MOST IMPORTANT --> Center of image! <--
 
     # region Initialization
     def initialize_models(self):
@@ -414,13 +523,6 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
             self.live_image_timer.stop()
             self.radio_button_simswap.setChecked(True)
 
-    def change_combo_model(self):
-        if self.combo_box_model.currentIndex() == 0:
-            self.opt.name = "224"
-        elif self.combo_box_model.currentIndex() == 1:
-            self.opt.name = "230929"
-        self.force_rebuild = True
-
     def replay_video(self):
         if self.deep_fake_video:
             self.deep_fake_video.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -480,15 +582,18 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         image_size = np.clip(int(self.label_original_1.height()), 220, 500)
 
         # Original Images
-        for i, label in enumerate([self.label_original_1, self.label_original_2]):
+        for i, (label, label_cit) in enumerate(zip([self.label_original_1, self.label_original_2], [self.label_original_1_citation, self.label_original_2_citation])):
             image_path = r".\images\scenes\{:02d}\{:02d}.jpg".format(self.selected_clip, i+1)
-            original_image = QPixmap(image_path).scaledToHeight(image_size*self.output_image_scaling)
+            original_image = QPixmap(image_path).scaledToHeight(image_size*self.output_image_scaling,
+                                                                mode=QtCore.Qt.TransformationMode.SmoothTransformation)
             label.setPixmap(original_image)
+            label_cit.setText(original_image_citation[self.selected_clip][i])
 
         # Generated Images
         for i, label in enumerate([self.label_deep_fake_1, self.label_deep_fake_2]):
             image_path = r".\images\generated\{:02d}.jpg".format(i+1)
-            original_image = QPixmap(image_path).scaledToHeight(image_size*self.output_image_scaling)
+            original_image = QPixmap(image_path).scaledToHeight(image_size*self.output_image_scaling,
+                                                                mode=QtCore.Qt.TransformationMode.SmoothTransformation)
             label.setPixmap(original_image)
 
     def clear_output_images(self):
@@ -526,9 +631,6 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         ims = 512
         dist = 30
 
-        # cv2.putText(empty_image, "HHN Face Wizard", (400, 120), cv2.FONT_HERSHEY_TRIPLEX, 3, (0,0,0), 4, cv2.LINE_AA)
-        # cv2.putText(empty_image, "Deep Fake Generator", (450, 200), cv2.FONT_HERSHEY_TRIPLEX, 2, (0,0,0), 4, cv2.LINE_AA)
-
         empty_image[0:header.shape[1], :] = header
 
         empty_image[0+offset_y:ims+offset_y, 0+offset_x:ims+offset_x] = original_1
@@ -558,7 +660,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
                 final_image[0:256, 0:256] = source_face_rescaled
                 cv2.imwrite(r".\images\generated\{:02d}.jpg".format(i + 1), final_image)
                 self.progress_bar.setValue(value)
-            self.generate_print_image()
+            # self.generate_print_image()
 
             # 4. Switch to Output UI & show image results
             self.tool_box.setEnabled(True)
@@ -569,6 +671,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
             self.progress_bar.setValue(0)
             self.tool_box.repaint()
 
+            self.label_video_citication.setText(video_citation[self.selected_clip])
             # 5. Meanwhile, apply Face Swap to the whole video in background
             if not os.path.isfile(r".\videos\scenes\{:02d}\scene.mp4".format(self.selected_clip)):
                 return
@@ -613,7 +716,6 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
                 self.stop_recording_timer.start(6000)
                 self.your_face_here = cv2.imread("./images/logos/your_face_here_recording.png", cv2.IMREAD_UNCHANGED)
                 self.your_face_here = cv2.resize(self.your_face_here, (0, 0), fx=self.marker_factor, fy=self.marker_factor)
-
                 return
 
             # 2. Deactivate tool box while operating
@@ -644,6 +746,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
             self.progress_bar.setValue(0)
             self.tool_box.repaint()
 
+            self.label_video_citication.setText(reenactment_citation[self.selected_clip])
             self.deep_fake_video = cv2.VideoCapture(r".\videos\generated\reenactment.mp4")
             self.deep_fake_video_timer.start(30)
         elif self.tool_box.currentIndex() == 1:
