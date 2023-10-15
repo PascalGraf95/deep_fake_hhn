@@ -205,7 +205,7 @@ original_image_citation = [
 ]
 
 video_citation = [
-    "TheOfficialPandora (https://www.youtube.com/watch?v=s_qu53JGOO0), „Pandora x Millie Bobby Brown: Make Mother’s Day special with Pandora jewellery“, https://creativecommons.org/licenses/by/2.0/legalcode"
+    "TheOfficialPandora (https://www.youtube.com/watch?v=s_qu53JGOO0), „Pandora x Millie Bobby Brown: Make Mother’s Day special with Pandora jewellery“, https://creativecommons.org/licenses/by/2.0/legalcode",
     "ONU Brasil (https://www.youtube.com/watch?v=AUcNl1RFmuo), „Embaixador do UNICEF, Orlando Bloom visita Moçambique“, https://creativecommons.org/licenses/by/2.0/legalcode",
     "Heinrich-Böll-Stiftung (https://www.youtube.com/watch?v=gZOxPMoBFtg&t=1086s), „Gesellschaftsprojekt Energiewende - Eröffnungsimpuls Robert Habeck“, https://creativecommons.org/licenses/by/2.0/legalcode",
     "Start coding! (https://www.youtube.com/watch?v=kHGAnK-vn_g), „Ranga Yogeshwar – Start Coding!“, https://creativecommons.org/licenses/by/2.0/legalcode",
@@ -587,7 +587,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
             original_image = QPixmap(image_path).scaledToHeight(image_size*self.output_image_scaling,
                                                                 mode=QtCore.Qt.TransformationMode.SmoothTransformation)
             label.setPixmap(original_image)
-            label_cit.setText(original_image_citation[self.selected_clip][i])
+            label_cit.setText(original_image_citation[self.selected_clip-1][i])
 
         # Generated Images
         for i, label in enumerate([self.label_deep_fake_1, self.label_deep_fake_2]):
@@ -670,8 +670,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
             self.tool_box.setCurrentIndex(1)
             self.progress_bar.setValue(0)
             self.tool_box.repaint()
-
-            self.label_video_citication.setText(video_citation[self.selected_clip])
+            self.label_video_citication.setText(video_citation[self.selected_clip-1])
             # 5. Meanwhile, apply Face Swap to the whole video in background
             if not os.path.isfile(r".\videos\scenes\{:02d}\scene.mp4".format(self.selected_clip)):
                 return
@@ -746,7 +745,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
             self.progress_bar.setValue(0)
             self.tool_box.repaint()
 
-            self.label_video_citication.setText(reenactment_citation[self.selected_clip])
+            self.label_video_citication.setText(reenactment_citation[self.selected_clip-1])
             self.deep_fake_video = cv2.VideoCapture(r".\videos\generated\reenactment.mp4")
             self.deep_fake_video_timer.start(30)
         elif self.tool_box.currentIndex() == 1:
@@ -802,7 +801,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         final_images = []
         for p, d, g in zip(predictions, drivings, depth_gray):
             g = cv2.cvtColor(g, cv2.COLOR_GRAY2RGB)
-            final_images.append(np.concatenate([d, g, p], axis=1))
+            final_images.append(np.concatenate([d, p, g], axis=1))
 
         imageio.mimsave("videos/generated/reenactment.mp4", [img_as_ubyte(im) for im in final_images], fps=fps)
 

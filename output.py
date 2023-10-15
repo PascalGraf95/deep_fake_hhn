@@ -698,6 +698,7 @@ class Ui_DeepFakeHHN(object):
         self.label_video_citication.setFont(font)
         self.label_video_citication.setText("")
         self.label_video_citication.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.label_video_citication.setWordWrap(True)
         self.label_video_citication.setObjectName("label_video_citication")
         self.verticalLayout_21.addWidget(self.label_video_citication)
         self.horizontalLayout_5 = QtWidgets.QHBoxLayout()
@@ -777,6 +778,7 @@ class Ui_DeepFakeHHN(object):
         self.label_original_1_citation.setFont(font)
         self.label_original_1_citation.setText("")
         self.label_original_1_citation.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.label_original_1_citation.setWordWrap(True)
         self.label_original_1_citation.setObjectName("label_original_1_citation")
         self.gridLayout_3.addWidget(self.label_original_1_citation, 2, 2, 1, 1)
         self.horizontalLayout_7 = QtWidgets.QHBoxLayout()
@@ -812,6 +814,7 @@ class Ui_DeepFakeHHN(object):
         self.label_original_2_citation.setFont(font)
         self.label_original_2_citation.setText("")
         self.label_original_2_citation.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.label_original_2_citation.setWordWrap(True)
         self.label_original_2_citation.setObjectName("label_original_2_citation")
         self.gridLayout_3.addWidget(self.label_original_2_citation, 4, 2, 1, 1)
         self.horizontalLayout_3.addLayout(self.gridLayout_3)
@@ -842,7 +845,7 @@ class Ui_DeepFakeHHN(object):
         DeepFakeHHN.setStatusBar(self.statusbar)
 
         self.retranslateUi(DeepFakeHHN)
-        self.tab_widget_input.setCurrentIndex(1)
+        self.tab_widget_input.setCurrentIndex(0)
         QtCore.QMetaObject.connectSlotsByName(DeepFakeHHN)
 
     def retranslateUi(self, DeepFakeHHN):
