@@ -93,7 +93,7 @@ def process_video(video_path):
     commands = []
     try:
         for i, frame in tqdm(enumerate(video)):
-            if i % 3:
+            if i % 4:
                 continue
             frame_shape = frame.shape
             bboxes = extract_bbox(frame, fa)

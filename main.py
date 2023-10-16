@@ -275,8 +275,9 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         self.record_mode = False
         self.recording_path = "temp_recording"
         self.scene_image_scaling = 0.73
-        self.input_image_scaling = 0.55
-        self.output_image_scaling = 0.9
+        self.input_image_scaling = 0.65
+        self.output_image_scaling = 0.95
+        self.video_scaling = 0.85
         # endregion
 
         # region Model Initialization
@@ -284,7 +285,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         # endregion
 
         # region Initial Label States
-        header = QPixmap("./images/logos/Header.png").scaledToWidth(self.label_title.width(),
+        header = QPixmap("./images/logos/Header.png").scaledToWidth(int(self.label_title.width()*0.95),
                                                                 mode=QtCore.Qt.TransformationMode.SmoothTransformation)
         self.label_title.setPixmap(header)
 
@@ -570,7 +571,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         if ret:
             resize_ratio = np.min([self.label_deep_fake_video.size().width()/image.shape[1],
                                    self.label_deep_fake_video.size().height()/image.shape[0]])
-            image = cv2.resize(image, dsize=(int(image.shape[1]*resize_ratio), int(image.shape[0]*resize_ratio)))
+            image = cv2.resize(image, dsize=(int(image.shape[1]*resize_ratio*self.video_scaling), int(image.shape[0]*resize_ratio*self.video_scaling)))
             convert = QImage(image, image.shape[1], image.shape[0], image.strides[0], QImage.Format.Format_BGR888)
             self.label_deep_fake_video.setPixmap(QPixmap.fromImage(convert))
         else:
@@ -728,6 +729,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
 
             imageio.mimsave("target.mp4", [img_as_ubyte(i) for i in images], fps=int(1000/self.video_freq))
             commands = process_video("target.mp4")
+            print(commands)
             self.progress_bar.setValue(25)
             subprocess.run(shlex.split(commands[0]))
             self.progress_bar.setValue(50)
