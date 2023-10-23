@@ -277,7 +277,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         self.scene_image_scaling = 0.73
         self.input_image_scaling = 0.65
         self.output_image_scaling = 0.95
-        self.video_scaling = 0.85
+        self.video_scaling = 0.9
         # endregion
 
         # region Model Initialization
