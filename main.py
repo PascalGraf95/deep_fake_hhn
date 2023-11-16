@@ -370,8 +370,6 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         # endregion
 
         # ToDo: Fix Video Audio
-        # ToDo: INPUT FACES NAMES
-        # ToDo: Print Shit
         # ToDo: MOST IMPORTANT --> Center of image! <--
 
     # region Initialization
@@ -729,9 +727,23 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
 
             imageio.mimsave("target.mp4", [img_as_ubyte(i) for i in images], fps=int(1000/self.video_freq))
             commands = process_video("target.mp4")
-            print(commands)
             self.progress_bar.setValue(25)
-            subprocess.run(shlex.split(commands[0]))
+
+            # Make sure only faces detected since beginning are considered
+
+            splitted_commands = [shlex.split(c) for c in commands]
+            face_detected_since = [float(sc[5]) for sc in splitted_commands]
+            for idx, com in enumerate(splitted_commands):
+                if face_detected_since[idx] >= 1:
+                    splitted_commands.remove(com)
+            # Calculate distance of faces to center of the image and take the one with smallest distance
+            image_center = np.array(images[0].shape[:2])/2
+            culled_commands = [sp[9].replace("crop=", "").split(",")[0].split(":") for sp in splitted_commands]
+            face_positions = [(float(cc[3])+float(cc[1])/2, float(cc[2])+float(cc[0])/2) for cc in culled_commands]
+            face_positions = np.array(face_positions)
+            distances_to_center = [np.linalg.norm(fp-image_center) for fp in face_positions]
+            argmin_distance = np.argmin(distances_to_center)
+            subprocess.run(splitted_commands[argmin_distance])
             self.progress_bar.setValue(50)
 
             # 4. Create Face Reenactment
@@ -919,7 +931,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_DeepFakeHHN):
         # Detect face in webcam image and extract features
         with torch.no_grad():
             source_face_image, _, bboxes = self.face_det_model.get(self.recorded_image, self.opt.crop_size)
-            bbox_sizes = [b[2]*b[3] for b in bboxes]
+            # bbox_vals = [b[4] for b in bboxes]
+            bbox_sizes = [(b[2]-b[0])*(b[3]-b[1]) for b in bboxes]
             max_size_idx = np.argmax(bbox_sizes)
 
             self.source_face = source_face_image[max_size_idx].copy()
